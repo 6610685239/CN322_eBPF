@@ -1,37 +1,64 @@
-#define KBUILD_MODNAME "xdp_firewall"
+// ไม่ต้อง define KBUILD_MODNAME เอง เพราะ BCC ทำให้แล้ว (แก้ Warning)
 #include <uapi/linux/bpf.h>
-#include <linux/in.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
+#include <uapi/linux/if_ether.h>
+#include <uapi/linux/ip.h>
+#include <uapi/linux/in.h>
+#include <uapi/linux/tcp.h> // <--- เปลี่ยนมาใช้ UAPI เพื่อแก้ Error
 
-// ฟังก์ชันนี้จะถูกเรียกทุกครั้งที่มี Packet เข้ามา
-int xdp_prog(struct xdp_md *ctx)
-{
-    // 1. อ่านตำแหน่งข้อมูล
+// สร้างสมุดบัญชีดำ (Map)
+BPF_HASH(blacklist, u32, u64);
+
+int xdp_prog(struct xdp_md *ctx) {
+    // 1. ประกาศตัวแปร
     void *data = (void *)(long)ctx->data;
     void *data_end = (void *)(long)ctx->data_end;
-
-    // 2. เช็คEthernet Packet(Safety Check)
     struct ethhdr *eth = data;
-    if ((void *)(eth + 1) > data_end)
-        return XDP_PASS;
+    struct iphdr *ip;
+    struct tcphdr *tcp;
+    u32 saddr;
+    u64 *val;
 
-    // 3. เช็ค IP Packet
-    if (eth->h_proto != htons(ETH_P_IP))
-        return XDP_PASS;
+    // 2. เช็ค Ethernet Header
+    if ((void *)(eth + 1) > data_end) return XDP_PASS;
 
-    // 4. ดูข้อมูลใน IP Header
-    struct iphdr *ip = (void *)(eth + 1);
-    if ((void *)(ip + 1) > data_end)
-        return XDP_PASS;
+    // เช็คว่าเป็น IP Packet ไหม
+    if (eth->h_proto != htons(ETH_P_IP)) return XDP_PASS;
 
-    // 5. เช็ค ICMP (Ping)
-    // ถ้า Protocol == 1 คือ ICMP
-    if (ip->protocol == 1)
-    {
-        bpf_trace_printk("Ping detected! Dropping packet...\\n");
-        return XDP_DROP; // Dropping packet
+    // 3. เช็ค IP Header
+    ip = (void *)(eth + 1);
+    if ((void *)(ip + 1) > data_end) return XDP_PASS;
+
+    // *** ด่านที่ 1: เช็ค Blacklist IP ***
+    saddr = ip->saddr; 
+    val = blacklist.lookup(&saddr);
+    
+    if (val) {
+        lock_xadd(val, 1); 
+        bpf_trace_printk("Blocked Blacklisted IP: %x\\n", saddr);
+        return XDP_DROP;
     }
 
-    return XDP_PASS; // ถ้าไม่ใช่ Ping ปล่อยผ่าน
+    // *** ด่านที่ 2: เช็ค Ping (ICMP) ***
+    // IPPROTO_ICMP = 1
+    if (ip->protocol == 1) {
+        bpf_trace_printk("Blocked ICMP Ping!\\n");
+        return XDP_DROP;
+    }
+
+    // *** ด่านที่ 3: เช็ค Web Port 8000 (TCP) ***
+    // IPPROTO_TCP = 6
+    if (ip->protocol == 6) {
+        // คำนวณตำแหน่ง TCP Header
+        tcp = (void *)ip + (ip->ihl * 4);
+        
+        if ((void *)(tcp + 1) > data_end) return XDP_PASS;
+
+        // เช็ค Port 8000
+        if (ntohs(tcp->dest) == 8000 ) {
+            bpf_trace_printk("Blocked Web Access (Port 8000)!\\n");
+            return XDP_DROP; 
+        }
+    }
+
+    return XDP_PASS;
 }
