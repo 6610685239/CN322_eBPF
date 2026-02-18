@@ -17,7 +17,7 @@ int xdp_prog(struct xdp_md *ctx) {
     struct tcphdr *tcp;
     u32 saddr;
     u64 *val;
-
+    u16 dport = 0; 
     // 2. เช็ค Ethernet Header
     if ((void *)(eth + 1) > data_end) return XDP_PASS;
 
@@ -34,14 +34,14 @@ int xdp_prog(struct xdp_md *ctx) {
     
     if (val) {
         lock_xadd(val, 1); 
-        bpf_trace_printk("Blocked Blacklisted IP: %x\\n", saddr);
+        bpf_trace_printk("TYPE:B IP:%u\n", saddr);
         return XDP_DROP;
     }
 
     // *** ด่านที่ 2: เช็ค Ping (ICMP) ***
     // IPPROTO_ICMP = 1
     if (ip->protocol == 1) {
-        bpf_trace_printk("Blocked ICMP Ping!\\n");
+        bpf_trace_printk("TYPE:P IP:%u\n", saddr);
         return XDP_DROP;
     }
 
@@ -55,7 +55,7 @@ int xdp_prog(struct xdp_md *ctx) {
 
         // เช็ค Port 8000
         if (ntohs(tcp->dest) == 8000 ) {
-            bpf_trace_printk("Blocked Web Access (Port 8000)!\\n");
+            bpf_trace_printk("TYPE:W IP:%u PORT:%u\n", (u32)saddr, (u32)dport);
             return XDP_DROP; 
         }
     }
