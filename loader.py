@@ -6,7 +6,7 @@ import ctypes
 BLACKLIST_IP = [
     "8.8.8.8",
     "1.1.1.1",
-    "127.0.0.1"
+    "192.168.1.108"
 ]
 
 devices = ["enp0s9", "enp0s8", "enp0s3", "lo"]
@@ -67,5 +67,5 @@ try:
 except KeyboardInterrupt:
     pass
 
-b.remove_xdp(device, 0)
+b.remove_xdp(devices, 0)
 print("Done.")
