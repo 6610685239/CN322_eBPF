@@ -1,11 +1,11 @@
-# 🧊 Great Icewall of Thailand
-**High-Performance Network Firewall using eBPF and XDP**
+#  Great Icewall of Thailand
+**High-Performance Network Firewall using eBPF and XDP Project**
 
 This project implements a high-performance packet filtering firewall using **eBPF (Extended Berkeley Packet Filter)** and **XDP (eXpress Data Path)** on Linux. It runs directly in the kernel space (network driver hook), allowing it to drop malicious packets with minimal CPU overhead before they reach the OS stack.
 
 ---
 
-## 👥 Team Members
+## Team Members
 **Subject:** CN322 Computer Network Security  
 **Semester:** 2/2568
 
@@ -48,7 +48,7 @@ This project implements a high-performance packet filtering firewall using **eBP
 
 ---
 
-## 🚀 Features
+## Features
 The firewall currently supports the following filtering rules:
 
 1.  **Dynamic IP Blacklisting:** Blocks specific IP addresses defined in an eBPF Hash Map.
@@ -58,7 +58,7 @@ The firewall currently supports the following filtering rules:
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 *   **OS:** Ubuntu 22.04 LTS or 24.04 LTS (VirtualBox/VMware recommended)
 *   **Kernel:** Linux 5.4+ (Supports XDP)
 *   **Tools:** Python 3, BCC (BPF Compiler Collection), Clang, LLVM
