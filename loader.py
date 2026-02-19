@@ -67,5 +67,6 @@ try:
 except KeyboardInterrupt:
     pass
 
-b.remove_xdp(devices, 0)
+for dev in devices:
+    b.remove_xdp(dev, 0)
 print("Done.")
