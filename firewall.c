@@ -1,61 +1,61 @@
-// ไม่ต้อง define KBUILD_MODNAME เอง เพราะ BCC ทำให้แล้ว (แก้ Warning)
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/if_ether.h>
 #include <uapi/linux/ip.h>
 #include <uapi/linux/in.h>
-#include <uapi/linux/tcp.h> // <--- เปลี่ยนมาใช้ UAPI เพื่อแก้ Error
+#include <uapi/linux/tcp.h>
 
-// สร้างสมุดบัญชีดำ (Map)
+// 1. นิยามโครงสร้างข้อมูลที่จะส่งกลับไป Python
+struct data_t {
+    u32 saddr;    // Source IP
+    u16 dport;    // Destination Port
+    u32 type;     // ประเภท (1:Blacklist, 2:Ping, 3:Web)
+};
+
+// 2. สร้างท่อส่งข้อมูลชื่อ "events"
+BPF_PERF_OUTPUT(events);
 BPF_HASH(blacklist, u32, u64);
 
 int xdp_prog(struct xdp_md *ctx) {
-    // 1. ประกาศตัวแปร
     void *data = (void *)(long)ctx->data;
     void *data_end = (void *)(long)ctx->data_end;
     struct ethhdr *eth = data;
     struct iphdr *ip;
     struct tcphdr *tcp;
-    u32 saddr;
-    u64 *val;
+    struct data_t evt = {}; // สร้างตัวแปรไว้เก็บข้อมูลส่งออก
 
-    // 2. เช็ค Ethernet Header
     if ((void *)(eth + 1) > data_end) return XDP_PASS;
-
-    // เช็คว่าเป็น IP Packet ไหม
     if (eth->h_proto != htons(ETH_P_IP)) return XDP_PASS;
 
-    // 3. เช็ค IP Header
     ip = (void *)(eth + 1);
     if ((void *)(ip + 1) > data_end) return XDP_PASS;
 
-    // *** ด่านที่ 1: เช็ค Blacklist IP ***
-    saddr = ip->saddr; 
-    val = blacklist.lookup(&saddr);
-    
+    evt.saddr = ip->saddr; // บันทึก IP ลงในตัวแปรที่จะส่ง
+
+    // --- ด่านที่ 1: Blacklist ---
+    u64 *val = blacklist.lookup(&evt.saddr);
     if (val) {
         lock_xadd(val, 1); 
-        bpf_trace_printk("Blocked Blacklisted IP: %x\\n", saddr);
+        evt.type = 1; // ประเภท Blacklist
+        events.perf_submit(ctx, &evt, sizeof(evt)); // ส่งข้อมูลผ่านท่อ
         return XDP_DROP;
     }
 
-    // *** ด่านที่ 2: เช็ค Ping (ICMP) ***
-    // IPPROTO_ICMP = 1
+    // --- ด่านที่ 2: ICMP Ping ---
     if (ip->protocol == 1) {
-        bpf_trace_printk("Blocked ICMP Ping!\\n");
+        evt.type = 2; // ประเภท Ping
+        events.perf_submit(ctx, &evt, sizeof(evt));
         return XDP_DROP;
     }
 
-    // *** ด่านที่ 3: เช็ค Web Port 8000 (TCP) ***
-    // IPPROTO_TCP = 6
+    // --- ด่านที่ 3: TCP Port ---
     if (ip->protocol == 6) {
-        // คำนวณตำแหน่ง TCP Header
         tcp = (void *)ip + (ip->ihl * 4);
-        
         if ((void *)(tcp + 1) > data_end) return XDP_PASS;
 
-        // เช็ค Port 8000
-        if (ntohs(tcp->dest) == 8000 ) {
-            bpf_trace_printk("Blocked Web Access (Port 8000)!\\n");
+        evt.dport = ntohs(tcp->dest); // บันทึก Port
+        if (evt.dport == 8000 || evt.dport == 80 || evt.dport == 443) {
+            evt.type = 3; // ประเภท Web
+            events.perf_submit(ctx, &evt, sizeof(evt));
             return XDP_DROP; 
         }
     }

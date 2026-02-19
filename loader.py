@@ -1,44 +1,72 @@
 from bcc import BPF
-import time
 import socket
 import struct
 import ctypes
 
-# *** ตั้งค่าชื่อการ์ดแลน ***
-# ใช้ "lo" ถ้าเทสในเครื่องตัวเอง (curl localhost)
-# ใช้ "enp0s3" ถ้าเทสจากเครื่องอื่น
-device = "enp0s9" #"lo" 
+BLACKLIST_IP = [
+    "8.8.8.8",
+    "1.1.1.1",
+    "192.168.1.108"
+]
 
-print(f"Loading Firewall on {device}...")
+devices = ["enp0s9", "enp0s8", "enp0s3", "lo"]
 
-# 1. โหลดโค้ด C
 b = BPF(src_file="firewall.c")
 fn = b.load_func("xdp_prog", BPF.XDP)
 
-# 2. ติดตั้ง Firewall
-b.attach_xdp(device, fn, 0)
+for dev in devices:
+    b.attach_xdp(dev, fn, 0)
 
-# 3. (Option) ลองแบน IP เล่นๆ
-# สมมติแบน IP: 1.2.3.4 (เพื่อโชว์ว่า Map ทำงานได้)
-blacklist = b["blacklist"]
-bad_ip = struct.unpack("I", socket.inet_aton("192.168.1.108"))[0]
-blacklist[ctypes.c_uint32(bad_ip)] = ctypes.c_uint64(0)
+def ip_to_int(ip_str):
+    return struct.unpack("I", socket.inet_aton(ip_str))[0]
 
-print("🔥 Firewall ACTIVE!")
-print("Rules:")
-print("1. Blacklisted IPs -> DROP")
-print("2. ICMP Ping     -> DROP")
-print("3. TCP Port 8000 -> DROP")
-print("---------------------------------")
-print("Press Ctrl+C to stop.")
+def int_to_ip(ip_int):
+    return socket.inet_ntoa(struct.pack("<I", ip_int))
 
-# 4. อ่าน Log
+blacklist_map = b["blacklist"]
+for ip in BLACKLIST_IP:
+    try:
+        ip_int = ip_to_int(ip)
+        blacklist_map[ctypes.c_uint32(ip_int)] = ctypes.c_uint64(0)
+    except Exception as e:
+        None
+
+def int_to_ip(ip_int):
+    return socket.inet_ntoa(struct.pack("<I", ip_int))
+
+# ฟังก์ชันที่จะถูกเรียกเมื่อมีข้อมูลส่งมาจาก Kernel
+def print_event(cpu, data, size):
+    # รับข้อมูลและแปลงกลับเป็นโครงสร้าง C (Struct)
+    class Data(ctypes.Structure):
+        _fields_ = [
+            ("saddr", ctypes.c_uint32),
+            ("dport", ctypes.c_uint16),
+            ("type", ctypes.c_uint32)
+        ]
+    
+    event = ctypes.cast(data, ctypes.POINTER(Data)).contents
+    ip_str = int_to_ip(event.saddr)
+    
+    if event.type == 1:
+        print(f"[BLACKLIST] Blocked IP: {ip_str}")
+    elif event.type == 2:
+        print(f"[PING] Blocked Ping from: {ip_str}")
+    elif event.type == 3:
+        print(f"[WEB] Blocked Access from: {ip_str} -> Target Port: {event.dport}")
+
+# 3. เปิดท่อรับข้อมูล
+b["events"].open_perf_buffer(print_event)
+
+print("🔥 Firewall ACTIVE & MONITORING...")
+print("---------------------------------------------")
+
 try:
-    b.trace_print()
+    while True:
+        # วนลูปเช็คข้อมูลจากท่อ (ไม่กิน CPU)
+        b.perf_buffer_poll()
 except KeyboardInterrupt:
     pass
 
-# 5. ถอด Firewall
-print("\nRemoving Firewall...")
-b.remove_xdp(device, 0)
+for dev in devices:
+    b.remove_xdp(dev, 0)
 print("Done.")
