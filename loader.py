@@ -11,7 +11,7 @@ BLACKLIST_IP = [
 
 devices = ["enp0s9", "enp0s8", "enp0s3", "lo"]
 
-b = BPF(src_file="firewall.c")
+b = BPF(src_file="firewall.c", cflags=["-Wno-macro-redefined", "-Wno-duplicate-decl-specifier"])
 fn = b.load_func("xdp_prog", BPF.XDP)
 
 for dev in devices:
@@ -69,4 +69,4 @@ except KeyboardInterrupt:
 
 for dev in devices:
     b.remove_xdp(dev, 0)
-print("Done.")
+print("\nDone.")
