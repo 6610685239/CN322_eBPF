@@ -34,9 +34,7 @@ for ip in BLACKLIST_IP:
 def int_to_ip(ip_int):
     return socket.inet_ntoa(struct.pack("<I", ip_int))
 
-# ฟังก์ชันที่จะถูกเรียกเมื่อมีข้อมูลส่งมาจาก Kernel
 def print_event(cpu, data, size):
-    # รับข้อมูลและแปลงกลับเป็นโครงสร้าง C (Struct)
     class Data(ctypes.Structure):
         _fields_ = [
             ("saddr", ctypes.c_uint32),
@@ -54,7 +52,6 @@ def print_event(cpu, data, size):
     elif event.type == 3:
         print(f"[WEB] Blocked Access from: {ip_str} -> Target Port: {event.dport}")
 
-# 3. เปิดท่อรับข้อมูล
 b["events"].open_perf_buffer(print_event)
 
 print("🔥 Firewall ACTIVE & MONITORING...")
@@ -62,7 +59,6 @@ print("---------------------------------------------")
 
 try:
     while True:
-        # วนลูปเช็คข้อมูลจากท่อ (ไม่กิน CPU)
         b.perf_buffer_poll()
 except KeyboardInterrupt:
     pass
