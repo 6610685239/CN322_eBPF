@@ -31,9 +31,6 @@ for ip in BLACKLIST_IP:
     except Exception as e:
         None
 
-def int_to_ip(ip_int):
-    return socket.inet_ntoa(struct.pack("<I", ip_int))
-
 # ฟังก์ชันที่จะถูกเรียกเมื่อมีข้อมูลส่งมาจาก Kernel
 def print_event(cpu, data, size):
     # รับข้อมูลและแปลงกลับเป็นโครงสร้าง C (Struct)
