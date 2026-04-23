@@ -6,17 +6,48 @@ Web-based control panel for the XDP BPF firewall — built with React + Node.js 
 
 ```
 firewall-dashboard/
-├── firewall.c          ← BPF kernel program (XDP)
-├── loader.py           ← Python BPF loader + IPC client
-├── backend/
-│   ├── server.js       ← Node.js REST API + WebSocket + IPC server
-│   └── package.json
-└── frontend/
-    ├── index.html
-    ├── vite.config.js
-    └── src/
-        ├── main.jsx
-        └── App.jsx     ← React Dashboard
+├── setup.sh                     ← ติดตั้ง dependencies ทั้งหมด
+├── firewall.c                   ← BPF/XDP kernel program
+├── loader.py                    ← Python loader + IPC client
+│
+├── backend/                     ← Node.js Backend (OOAD)
+│   ├── server.js                ← Entry point (Bootstrap)
+│   ├── .env                     ← Config (สร้างโดย setup.sh)
+│   ├── config/
+│   │   └── Database.js          ← Singleton Pattern
+│   ├── repositories/            ← Repository Pattern
+│   │   ├── UserRepository.js
+│   │   ├── BlacklistRepository.js
+│   │   ├── PortRepository.js
+│   │   ├── LogRepository.js
+│   │   └── FeatureFlagRepository.js
+│   ├── services/                ← Service Layer (Business Logic)
+│   │   ├── AuthService.js
+│   │   ├── FirewallService.js
+│   │   └── LogService.js
+│   ├── controllers/             ← MVC Controllers
+│   │   ├── AuthController.js
+│   │   ├── FeatureController.js
+│   │   ├── BlacklistController.js
+│   │   ├── PortController.js
+│   │   └── LogController.js
+│   ├── routes/
+│   │   └── index.js             ← URL → Controller mapping
+│   ├── middleware/
+│   │   └── authMiddleware.js    ← JWT verification
+│   ├── ipc/
+│   │   └── IPCServer.js         ← Observer Pattern (Unix Socket)
+│   └── websocket/
+│       └── WSServer.js          ← Observer Pattern (WebSocket)
+│
+└── frontend/                    ← React.js Frontend
+    ├── src/
+    │   ├── App.jsx
+    │   ├── services/api.js
+    │   ├── hooks/
+    │   ├── components/
+    │   └── pages/
+    └── dist/                    ← Production build (สร้างโดย setup.sh)
 ```
 
 ## Architecture
