@@ -13,7 +13,6 @@ import threading
 import json
 import time
 import os
-import sys
 
 # ─── Config ───────────────────────────────────────────────
 IPC_SOCKET_PATH = "/tmp/firewall.sock"
@@ -36,9 +35,6 @@ def ip_to_int(ip_str: str) -> int:
 def int_to_ip(ip_int: int) -> str:
     return socket.inet_ntoa(struct.pack("<I", ip_int))
 
-def ensure_db_dir():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
 
 # ══════════════════════════════════════════════════════════
 #  BPF Setup
@@ -57,6 +53,52 @@ for dev in DEVICES:
 blacklist_map    = b["blacklist"]
 port_map         = b["port_blocklist"]
 feature_flag_map = b["feature_flags"]
+whitelist_map    = b["whitelist"]
+
+
+# ══════════════════════════════════════════════════════════
+#  Whitelist — ใส่ IP ของเครื่องตัวเองทั้งหมดอัตโนมัติ
+# ══════════════════════════════════════════════════════════
+
+def populate_whitelist():
+    # รวบรวม IP จากทุก interface ผ่าน socket
+    local_ips = set()
+
+    try:
+        hostname = socket.gethostname()
+        primary_ip = socket.gethostbyname(hostname)
+        local_ips.add(primary_ip)
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ip", "-4", "addr", "show"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                ip_cidr = line.split()[1]          # เช่น "192.168.1.10/24"
+                ip_addr = ip_cidr.split("/")[0]    # ตัด prefix ออก
+                local_ips.add(ip_addr)
+    except Exception:
+        pass
+
+    # เพิ่ม loopback เสมอ
+    local_ips.add("127.0.0.1")
+
+    # ใส่เข้า BPF whitelist map
+    for ip_str in local_ips:
+        try:
+            ip_int = ip_to_int(ip_str)
+            whitelist_map[ctypes.c_uint32(ip_int)] = ctypes.c_uint8(1)
+            print(f"[WHITELIST] Allowed (self): {ip_str}")
+        except Exception as e:
+            print(f"[WHITELIST] Failed for {ip_str}: {e}")
+
+populate_whitelist()
 
 
 # ══════════════════════════════════════════════════════════
@@ -69,7 +111,7 @@ def load_initial_state():
         print("[DB] DB not found yet — will retry in 3 s")
         time.sleep(3)
         if not os.path.exists(DB_PATH):
-            print("[DB] DB still missing; starting with defaults (all features ON)")
+            print("[DB] DB still missing — starting with defaults (all features ON)")
             for key in [KEY_BLACKLIST, KEY_PING, KEY_PORT]:
                 feature_flag_map[ctypes.c_uint32(key)] = ctypes.c_uint8(1)
             return
@@ -115,30 +157,27 @@ load_initial_state()
 #  IPC — connect to Node.js and stream events / receive cmds
 # ══════════════════════════════════════════════════════════
 
-ipc_sock       = None
-ipc_lock       = threading.Lock()
-ipc_connected  = False
+ipc_sock      = None
+ipc_lock      = threading.Lock()
+ipc_connected = False
 
 
 def send_event(payload: dict):
-    """Thread-safe send to Node.js over IPC socket."""
     global ipc_sock
     with ipc_lock:
         if ipc_sock is None:
             return
         try:
-            msg = json.dumps(payload) + "\n"
-            ipc_sock.sendall(msg.encode())
+            ipc_sock.sendall((json.dumps(payload) + "\n").encode())
         except Exception:
-            pass  # handled by reconnect loop
+            pass
 
 
 def handle_command(cmd: dict):
-    """Process a command received from Node.js."""
     action = cmd.get("action")
 
     if action == "toggle_feature":
-        feature = cmd.get("feature")   # "blacklist" | "ping" | "port"
+        feature = cmd.get("feature")
         enabled = int(cmd.get("enabled", True))
         key_map = {"blacklist": KEY_BLACKLIST, "ping": KEY_PING, "port": KEY_PORT}
         if feature in key_map:
@@ -150,7 +189,7 @@ def handle_command(cmd: dict):
         try:
             ip_int = ip_to_int(ip_str)
             blacklist_map[ctypes.c_uint32(ip_int)] = ctypes.c_uint64(0)
-            print(f"[CMD] Add IP {ip_str}")
+            print(f"[CMD] Add blacklist IP: {ip_str}")
         except Exception as e:
             print(f"[CMD] add_ip error: {e}")
 
@@ -161,7 +200,7 @@ def handle_command(cmd: dict):
             key = ctypes.c_uint32(ip_int)
             if key in blacklist_map:
                 del blacklist_map[key]
-            print(f"[CMD] Remove IP {ip_str}")
+            print(f"[CMD] Remove blacklist IP: {ip_str}")
         except Exception as e:
             print(f"[CMD] remove_ip error: {e}")
 
@@ -169,7 +208,7 @@ def handle_command(cmd: dict):
         port = cmd.get("port")
         try:
             port_map[ctypes.c_uint16(int(port))] = ctypes.c_uint8(1)
-            print(f"[CMD] Add port {port}")
+            print(f"[CMD] Add blocked port: {port}")
         except Exception as e:
             print(f"[CMD] add_port error: {e}")
 
@@ -179,7 +218,7 @@ def handle_command(cmd: dict):
             key = ctypes.c_uint16(int(port))
             if key in port_map:
                 del port_map[key]
-            print(f"[CMD] Remove port {port}")
+            print(f"[CMD] Remove blocked port: {port}")
         except Exception as e:
             print(f"[CMD] remove_port error: {e}")
 
@@ -188,7 +227,6 @@ def handle_command(cmd: dict):
 
 
 def ipc_reader(sock):
-    """Read newline-delimited JSON commands from Node.js."""
     buf = b""
     while True:
         try:
@@ -200,8 +238,7 @@ def ipc_reader(sock):
                 line, buf = buf.split(b"\n", 1)
                 if line.strip():
                     try:
-                        cmd = json.loads(line.decode())
-                        handle_command(cmd)
+                        handle_command(json.loads(line.decode()))
                     except json.JSONDecodeError:
                         pass
         except Exception:
@@ -209,7 +246,6 @@ def ipc_reader(sock):
 
 
 def ipc_connect_loop():
-    """Persistent connection to Node.js IPC server with reconnect."""
     global ipc_sock, ipc_connected
     while True:
         try:
@@ -219,22 +255,15 @@ def ipc_connect_loop():
                 ipc_sock      = s
                 ipc_connected = True
             print("[IPC] Connected to Node.js")
-
-            # Send ready signal
             send_event({"type": "ready"})
-
-            # Block reading commands until disconnected
             ipc_reader(s)
-
             with ipc_lock:
                 ipc_sock      = None
                 ipc_connected = False
             s.close()
             print("[IPC] Disconnected — reconnecting in 3 s")
-
         except Exception as e:
             print(f"[IPC] Connect failed: {e} — retry in 3 s")
-
         time.sleep(3)
 
 ipc_thread = threading.Thread(target=ipc_connect_loop, daemon=True)
@@ -242,7 +271,7 @@ ipc_thread.start()
 
 
 # ══════════════════════════════════════════════════════════
-#  Perf buffer callback — forward events to Node.js & print
+#  Perf buffer callback
 # ══════════════════════════════════════════════════════════
 
 class EventData(ctypes.Structure):

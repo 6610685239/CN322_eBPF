@@ -20,6 +20,8 @@ BPF_HASH(blacklist, u32, u64);
 
 // Dynamic port blocklist (port -> 1)
 BPF_HASH(port_blocklist, u16, u8);
+// Whitelist
+BPF_HASH(whitelist, u32, u8);
 
 int xdp_prog(struct xdp_md *ctx) {
     void *data     = (void *)(long)ctx->data;
@@ -36,6 +38,11 @@ int xdp_prog(struct xdp_md *ctx) {
     if ((void *)(ip + 1) > data_end) return XDP_PASS;
 
     evt.saddr = ip->saddr;
+
+    // Whitelist
+    u8 *wl = whitelist.lookup(&evt.saddr);
+    if (wl) return XDP_PASS;
+
 
     u32 key_bl   = 0;
     u32 key_ping = 1;
