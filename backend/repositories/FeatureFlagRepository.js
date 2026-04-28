@@ -8,7 +8,7 @@
 
 "use strict";
 
-/** @typedef {"blacklist"|"ping"|"port"} FeatureName */
+/** @typedef {"blacklist"|"ping"|"port"|"udp_flood"|"icmp_flood"|"syn_flood"} FeatureName */
 
 class FeatureFlagRepository {
   /**
@@ -23,7 +23,7 @@ class FeatureFlagRepository {
   #db;
 
   /** @type {FeatureName[]} */
-  static VALID_FEATURES = ["blacklist", "ping", "port"];
+  static VALID_FEATURES = ["blacklist", "ping", "port", "udp_flood", "icmp_flood", "syn_flood"];
 
   /** เพิ่ม row เริ่มต้นถ้ายังไม่มี */
   #seed() {

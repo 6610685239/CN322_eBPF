@@ -28,16 +28,19 @@ const BlacklistRepository    = require("./repositories/BlacklistRepository");
 const PortRepository         = require("./repositories/PortRepository");
 const LogRepository          = require("./repositories/LogRepository");
 const FeatureFlagRepository  = require("./repositories/FeatureFlagRepository");
+const FloodRateRepository    = require("./repositories/FloodRateRepository");
 
 const AuthService            = require("./services/AuthService");
 const FirewallService        = require("./services/FirewallService");
 const LogService             = require("./services/LogService");
+const FloodService           = require("./services/FloodService");
 
 const AuthController         = require("./controllers/AuthController");
 const FeatureController      = require("./controllers/FeatureController");
 const BlacklistController    = require("./controllers/BlacklistController");
 const PortController         = require("./controllers/PortController");
 const LogController          = require("./controllers/LogController");
+const FloodController        = require("./controllers/FloodController");
 
 const createRouter           = require("./routes/index");
 const createAuthMiddleware   = require("./middleware/authMiddleware");
@@ -57,6 +60,7 @@ const blacklistRepository   = new BlacklistRepository(db);
 const portRepository        = new PortRepository(db);
 const logRepository         = new LogRepository(db);
 const featureFlagRepository = new FeatureFlagRepository(db);
+const floodRateRepository   = new FloodRateRepository(db);
 
 // ══════════════════════════════════════════════════════════════════════════
 //  3. IPC + WebSocket servers (ต้องสร้างก่อน Service เพราะ Service ต้องใช้)
@@ -78,6 +82,7 @@ const firewallService = new FirewallService(
   ipcServer
 );
 const logService = new LogService(logRepository, wsServer);
+const floodService = new FloodService(featureFlagRepository, floodRateRepository);
 
 // Seed default admin user
 authService.seedDefaultAdmin(ADMIN_USER, ADMIN_PASS);
@@ -115,6 +120,7 @@ const featureController   = new FeatureController(firewallService, wsServer);
 const blacklistController = new BlacklistController(firewallService);
 const portController      = new PortController(firewallService);
 const logController       = new LogController(logService);
+const floodController     = new FloodController(floodService);
 
 // ══════════════════════════════════════════════════════════════════════════
 //  7. Express app setup
@@ -129,6 +135,7 @@ const router = createRouter(
   blacklistController,
   portController,
   logController,
+  floodController,
   authMiddleware
 );
 
@@ -156,8 +163,20 @@ bootstrap().catch((err) => {
 // ── Graceful shutdown ──────────────────────────────────────────────────────
 function shutdown() {
   console.log("\n[App] Shutting down...");
+  wsServer.close();
   ipcServer.stop();
-  httpServer.close(() => process.exit(0));
+  
+  // Force exit after 5 seconds
+  const shutdownTimeout = setTimeout(() => {
+    console.warn("[App] Forced exit after timeout");
+    process.exit(1);
+  }, 5000);
+  
+  httpServer.close(() => {
+    clearTimeout(shutdownTimeout);
+    console.log("[App] Goodbye");
+    process.exit(0);
+  });
 }
 
 process.on("SIGINT",  shutdown);

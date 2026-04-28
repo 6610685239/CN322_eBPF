@@ -91,6 +91,18 @@ class WSServer {
     this.broadcast({ type: "firewall_status", connected });
   }
 
+  /**
+   * ปิด WebSocket server และ disconnect ทุก client
+   */
+  close() {
+    for (const ws of this.#clients) {
+      ws.close(1001, "Server shutting down");
+    }
+    this.#clients.clear();
+    this.#wss.close();
+    console.log("[WSServer] Closed");
+  }
+
   /** จำนวน client ที่ connect อยู่ ณ ขณะนี้ */
   get clientCount() {
     return this.#clients.size;

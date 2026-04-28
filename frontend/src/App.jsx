@@ -308,6 +308,34 @@ const CSS = `
     user-select: none; font-family: var(--font-mono);
   }
   .checkbox-label input { accent-color: var(--green); cursor: pointer; }
+
+  /* ── Flood Protection Panel ── */
+  .flood-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .flood-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+    transition: border-color .2s;
+    position: relative; overflow: hidden;
+  }
+  .flood-card.enabled { border-color: var(--green); }
+  .flood-card.enabled::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--green);
+  }
+  .flood-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+  .flood-stats {
+    font-size: 12px; color: var(--muted); display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .flood-stat-item { display: flex; flex-direction: column; gap: 4px; }
+  .flood-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .flood-stat-value { font-family: var(--font-mono); font-size: 14px; color: var(--text); }
+  .flood-control { display: flex; align-items: center; justify-content: space-between; }
+  .flood-status { font-family: var(--font-mono); font-size: 11px; }
+  .flood-status.on { color: var(--green); }
+  .flood-status.off { color: var(--red); }
 `;
 
 function injectCSS(css) {
@@ -679,6 +707,135 @@ function PortsPanel() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   FLOOD PROTECTION PANEL
+════════════════════════════════════════════════════════════════════ */
+const FLOOD_TYPES = [
+  { id: "udp_flood", label: "UDP Flood", icon: "💧", color: "var(--blue)" },
+  { id: "icmp_flood", label: "ICMP Flood", icon: "🎯", color: "var(--amber)" },
+  { id: "syn_flood", label: "SYN Flood", icon: "🔗", color: "var(--red)" },
+];
+
+function FloodPanel({ floodConfigs, onToggle, onUpdateRates }) {
+  const [editingType, setEditingType] = useState(null);
+  const [softLimit, setSoftLimit] = useState("");
+  const [hardLimit, setHardLimit] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  function openEdit(config) {
+    setEditingType(config.flood_type);
+    setSoftLimit(String(config.soft_limit));
+    setHardLimit(String(config.hard_limit));
+    setError("");
+  }
+
+  function closeEdit() {
+    setEditingType(null);
+    setSoftLimit("");
+    setHardLimit("");
+    setError("");
+  }
+
+  async function saveRates() {
+    setError("");
+    setLoading(true);
+    try {
+      await onUpdateRates(editingType, Number(softLimit), Number(hardLimit));
+      closeEdit();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">⚡ Flood Protection</span>
+      </div>
+      <div className="card-body">
+        <div className="flood-grid">
+          {FLOOD_TYPES.map(ft => {
+            const config = floodConfigs?.find(c => c.flood_type === ft.id);
+            const on = config?.enabled;
+            return (
+              <div key={ft.id} className={`flood-card ${on ? "enabled" : ""}`}>
+                <div style={{ fontSize: 28 }}>{ft.icon}</div>
+                <div>
+                  <div className="flood-title">{ft.label}</div>
+                  <div className="flood-stats">
+                    <div className="flood-stat-item">
+                      <div className="flood-stat-label">Soft Limit</div>
+                      <div className="flood-stat-value">{config?.soft_limit || "—"} pps</div>
+                    </div>
+                    <div className="flood-stat-item">
+                      <div className="flood-stat-label">Hard Limit</div>
+                      <div className="flood-stat-value">{config?.hard_limit || "—"} pps</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flood-control">
+                  <span className={`flood-status ${on ? "on" : "off"}`}>
+                    {on ? "● ENABLED" : "○ DISABLED"}
+                  </span>
+                  <label className="toggle">
+                    <div
+                      className={`toggle-track ${on ? "on" : ""}`}
+                      onClick={() => onToggle(ft.id, !on)}
+                    >
+                      <div className="toggle-thumb" />
+                    </div>
+                  </label>
+                </div>
+                {editingType !== ft.id && (
+                  <button
+                    className="btn"
+                    style={{ padding: "4px 12px", fontSize: 11, color: "var(--blue)", borderColor: "var(--blue)", marginTop: 8 }}
+                    onClick={() => openEdit(config)}
+                  >
+                    Edit Limits
+                  </button>
+                )}
+                {editingType === ft.id && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                    <input
+                      className="inp"
+                      placeholder="Soft limit"
+                      type="number"
+                      value={softLimit}
+                      onChange={e => setSoftLimit(e.target.value)}
+                      style={{ fontSize: 12 }}
+                    />
+                    <input
+                      className="inp"
+                      placeholder="Hard limit"
+                      type="number"
+                      value={hardLimit}
+                      onChange={e => setHardLimit(e.target.value)}
+                      style={{ fontSize: 12 }}
+                    />
+                    {error && <div className="err-msg" style={{ fontSize: 11 }}>⚠ {error}</div>}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-primary" onClick={saveRates} disabled={loading} style={{ flex: 1, fontSize: 11, padding: "4px" }}>
+                        Save
+                      </button>
+                      <button className="btn" onClick={closeEdit} style={{ flex: 1, fontSize: 11, padding: "4px", color: "var(--muted)", borderColor: "var(--border2)" }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
    LIVE LOGS PANEL
 ════════════════════════════════════════════════════════════════════ */
 function LogsPanel({ liveLog }) {
@@ -767,6 +924,7 @@ function LogsPanel({ liveLog }) {
 ════════════════════════════════════════════════════════════════════ */
 const TABS = [
   { id: "overview", label: "Overview", icon: "◈" },
+  { id: "flood", label: "Flood Protection", icon: "⚡" },
   { id: "blacklist", label: "IP Blacklist", icon: "🚫" },
   { id: "ports", label: "Port Block", icon: "🔒" },
   { id: "logs", label: "Live Logs", icon: "📡" },
@@ -779,19 +937,22 @@ export default function App() {
   const [tab, setTab] = useState("overview");
   const [features, setFeatures] = useState({});
   const [stats, setStats] = useState(null);
+  const [floodConfigs, setFloodConfigs] = useState([]);
   const [liveLog, setLiveLog] = useState([]);
   const [fwOnline, setFwOnline] = useState(false);
   const wsRef = useRef(null);
 
-  /* ── Load features + stats ── */
+  /* ── Load features + stats + flood configs ── */
   async function loadData() {
     try {
-      const [f, s] = await Promise.all([
+      const [f, s, fc] = await Promise.all([
         apiFetch("/api/features"),
         apiFetch("/api/stats"),
+        apiFetch("/api/flood/config"),
       ]);
       setFeatures(f);
       setStats(s);
+      setFloodConfigs(fc || []);
     } catch { }
   }
 
@@ -847,6 +1008,45 @@ export default function App() {
     }
   }
 
+  /* ── Toggle flood protection ── */
+  async function onToggleFlood(floodType, enabled) {
+    setFloodConfigs(prev =>
+      prev.map(c =>
+        c.flood_type === floodType ? { ...c, enabled } : c
+      )
+    );
+    try {
+      await apiFetch(`/api/flood/config/${floodType}/enabled`, {
+        method: "PATCH",
+        body: { enabled },
+      });
+    } catch {
+      setFloodConfigs(prev =>
+        prev.map(c =>
+          c.flood_type === floodType ? { ...c, enabled: !enabled } : c
+        )
+      ); // rollback
+    }
+  }
+
+  /* ── Update flood rate limits ── */
+  async function onUpdateFloodRates(floodType, softLimit, hardLimit) {
+    setFloodConfigs(prev =>
+      prev.map(c =>
+        c.flood_type === floodType ? { ...c, soft_limit: softLimit, hard_limit: hardLimit } : c
+      )
+    );
+    try {
+      await apiFetch(`/api/flood/config/${floodType}/rates`, {
+        method: "PATCH",
+        body: { soft_limit: softLimit, hard_limit: hardLimit },
+      });
+    } catch (e) {
+      await loadData(); // reload to get old values
+      throw e;
+    }
+  }
+
   /* ── Auth ── */
   function handleLogin(username) { setUser(username); }
   function handleLogout() {
@@ -860,6 +1060,7 @@ export default function App() {
 
   const PAGE_TITLES = {
     overview: { title: "System Overview", sub: "Feature control & statistics" },
+    flood: { title: "Flood Protection", sub: "UDP/ICMP/SYN flood rate limiting" },
     blacklist: { title: "IP Blacklist", sub: "Manage blocked IP addresses" },
     ports: { title: "Port Blocklist", sub: "Manage blocked TCP ports" },
     logs: { title: "Live Event Log", sub: "Real-time traffic events" },
@@ -924,6 +1125,9 @@ export default function App() {
               <StatsPanel stats={stats} />
               <FeaturesPanel features={features} onToggle={onToggle} />
             </>
+          )}
+          {tab === "flood" && (
+            <FloodPanel floodConfigs={floodConfigs} onToggle={onToggleFlood} onUpdateRates={onUpdateFloodRates} />
           )}
           {tab === "blacklist" && <BlacklistPanel />}
           {tab === "ports" && <PortsPanel />}

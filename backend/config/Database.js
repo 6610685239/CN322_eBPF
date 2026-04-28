@@ -75,6 +75,23 @@ class Database {
         created_at TEXT    NOT NULL DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS flood_rates (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        flood_type TEXT    UNIQUE NOT NULL,
+        soft_limit INTEGER NOT NULL,
+        hard_limit INTEGER NOT NULL,
+        created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS flood_logs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        flood_type TEXT    NOT NULL,
+        ip         TEXT    NOT NULL,
+        event      TEXT    NOT NULL,
+        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS logs (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT    NOT NULL,

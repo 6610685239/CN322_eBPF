@@ -17,6 +17,7 @@ const express = require("express");
  * @param {import("../controllers/BlacklistController")}blacklistController
  * @param {import("../controllers/PortController")}     portController
  * @param {import("../controllers/LogController")}      logController
+ * @param {import("../controllers/FloodController")}    floodController
  * @param {import("../middleware/authMiddleware")}       authMiddleware
  * @returns {import("express").Router}
  */
@@ -26,6 +27,7 @@ function createRouter(
   blacklistController,
   portController,
   logController,
+  floodController,
   authMiddleware
 ) {
   const router = express.Router();
@@ -49,6 +51,14 @@ function createRouter(
   router.get   ("/ports",     portController.getAll);
   router.post  ("/ports",     portController.add);
   router.delete("/ports/:id", portController.remove);
+
+  // Flood Configuration & Logs
+  router.get   ("/flood/config",              floodController.getFloodConfigs);
+  router.get   ("/flood/config/:floodType",   floodController.getFloodConfig);
+  router.patch ("/flood/config/:floodType/enabled", floodController.setFloodEnabled);
+  router.patch ("/flood/config/:floodType/rates",   floodController.updateFloodRates);
+  router.get   ("/flood/logs",                floodController.getFloodLogs);
+  router.get   ("/flood/logs/:ip",            floodController.getFloodLogsByIp);
 
   // Logs & Stats
   router.get("/logs",  logController.getLogs);

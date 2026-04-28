@@ -23,6 +23,9 @@ DEVICES         = ["enp0s9", "enp0s8", "enp0s3", "lo"]
 KEY_BLACKLIST = 0
 KEY_PING      = 1
 KEY_PORT      = 2
+KEY_UDP_FLOOD = 10
+KEY_ICMP_FLOOD = 11
+KEY_SYN_FLOOD = 12
 
 
 # ══════════════════════════════════════════════════════════
@@ -54,6 +57,17 @@ blacklist_map    = b["blacklist"]
 port_map         = b["port_blocklist"]
 feature_flag_map = b["feature_flags"]
 whitelist_map    = b["whitelist"]
+flood_config_map = b["flood_config"]
+blocked_ips_map  = b["blocked_ips"]
+
+
+# ─── Flood config structure (must match firewall.c) ───────
+class FloodConfig(ctypes.Structure):
+    _fields_ = [
+        ("soft_limit", ctypes.c_uint32),
+        ("hard_limit", ctypes.c_uint32),
+        ("enabled", ctypes.c_uint32),
+    ]
 
 
 # ══════════════════════════════════════════════════════════
@@ -120,7 +134,8 @@ def load_initial_state():
     cur  = conn.cursor()
 
     # Feature flags
-    feature_key_map = {"blacklist": KEY_BLACKLIST, "ping": KEY_PING, "port": KEY_PORT}
+    feature_key_map = {"blacklist": KEY_BLACKLIST, "ping": KEY_PING, "port": KEY_PORT,
+                       "udp_flood": KEY_UDP_FLOOD, "icmp_flood": KEY_ICMP_FLOOD, "syn_flood": KEY_SYN_FLOOD}
     cur.execute("SELECT id, enabled FROM feature_flags")
     for row in cur.fetchall():
         name, enabled = row
@@ -128,6 +143,26 @@ def load_initial_state():
             k = feature_key_map[name]
             feature_flag_map[ctypes.c_uint32(k)] = ctypes.c_uint8(1 if enabled else 0)
             print(f"[INIT] Feature '{name}' = {'ON' if enabled else 'OFF'}")
+
+    # Flood rate limits
+    flood_type_map = {"udp_flood": KEY_UDP_FLOOD, "icmp_flood": KEY_ICMP_FLOOD, "syn_flood": KEY_SYN_FLOOD}
+    cur.execute("SELECT flood_type, soft_limit, hard_limit FROM flood_rates")
+    rows = cur.fetchall()
+    if not rows:
+        # Use defaults if no rows
+        rows = [
+            ("udp_flood", 100, 200),
+            ("icmp_flood", 50, 100),
+            ("syn_flood", 200, 400),
+        ]
+    
+    for row in rows:
+        flood_type, soft_limit, hard_limit = row
+        if flood_type in flood_type_map:
+            k = flood_type_map[flood_type]
+            cfg = FloodConfig(soft_limit=soft_limit, hard_limit=hard_limit, enabled=1)
+            flood_config_map[ctypes.c_uint32(k)] = cfg
+            print(f"[INIT] Flood '{flood_type}' soft={soft_limit} hard={hard_limit}")
 
     # Blacklist IPs
     cur.execute("SELECT ip FROM blacklist")
@@ -179,10 +214,22 @@ def handle_command(cmd: dict):
     if action == "toggle_feature":
         feature = cmd.get("feature")
         enabled = int(cmd.get("enabled", True))
-        key_map = {"blacklist": KEY_BLACKLIST, "ping": KEY_PING, "port": KEY_PORT}
+        key_map = {"blacklist": KEY_BLACKLIST, "ping": KEY_PING, "port": KEY_PORT,
+                   "udp_flood": KEY_UDP_FLOOD, "icmp_flood": KEY_ICMP_FLOOD, "syn_flood": KEY_SYN_FLOOD}
         if feature in key_map:
             feature_flag_map[ctypes.c_uint32(key_map[feature])] = ctypes.c_uint8(enabled)
             print(f"[CMD] Toggle '{feature}' → {'ON' if enabled else 'OFF'}")
+
+    elif action == "update_flood_rates":
+        flood_type = cmd.get("flood_type")
+        soft_limit = int(cmd.get("soft_limit", 0))
+        hard_limit = int(cmd.get("hard_limit", 0))
+        flood_type_map = {"udp_flood": KEY_UDP_FLOOD, "icmp_flood": KEY_ICMP_FLOOD, "syn_flood": KEY_SYN_FLOOD}
+        if flood_type in flood_type_map:
+            k = flood_type_map[flood_type]
+            cfg = FloodConfig(soft_limit=soft_limit, hard_limit=hard_limit, enabled=1)
+            flood_config_map[ctypes.c_uint32(k)] = cfg
+            print(f"[CMD] Update flood '{flood_type}' soft={soft_limit} hard={hard_limit}")
 
     elif action == "add_ip":
         ip_str = cmd.get("ip")
@@ -279,19 +326,31 @@ class EventData(ctypes.Structure):
         ("saddr", ctypes.c_uint32),
         ("dport", ctypes.c_uint16),
         ("type",  ctypes.c_uint32),
+        ("flood_type", ctypes.c_uint32),
     ]
 
-TYPE_LABEL = {1: "blacklist", 2: "ping", 3: "web"}
+TYPE_LABEL = {
+    1: "blacklist",
+    2: "ping",
+    3: "web",
+    4: "flood_hard_limit",
+    5: "flood_blocked",
+}
 
 def print_event(cpu, data, size):
     event  = ctypes.cast(data, ctypes.POINTER(EventData)).contents
     ip_str = int_to_ip(event.saddr)
     etype  = TYPE_LABEL.get(event.type, "unknown")
 
+    flood_type_names = {10: "UDP", 11: "ICMP", 12: "SYN"}
+    flood_name = flood_type_names.get(event.flood_type, f"type-{event.flood_type}")
+
     label = {
         1: f"[BLACKLIST] Blocked IP: {ip_str}",
         2: f"[PING]      Blocked Ping from: {ip_str}",
-        3: f"[WEB]       Blocked from: {ip_str} → Port {event.dport}",
+        3: f"[WEB]       Blocked {ip_str} → Port {event.dport}",
+        4: f"[FLOOD]     Hard limit exceeded: {flood_name} flood from {ip_str} (BLOCKED 1 min)",
+        5: f"[FLOOD]     Temporarily blocked IP: {ip_str}",
     }.get(event.type, f"[?] {ip_str}")
 
     print(label)
@@ -301,6 +360,7 @@ def print_event(cpu, data, size):
         "eventType": etype,
         "ip":        ip_str,
         "port":      event.dport if event.type == 3 else None,
+        "floodType": flood_name if event.type in [3, 4, 5] else None,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
 
