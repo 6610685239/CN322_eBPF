@@ -358,8 +358,8 @@ function fmtTime(ts) {
 function LoginPage({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
@@ -406,8 +406,8 @@ function LoginPage({ onLogin }) {
 ════════════════════════════════════════════════════════════════════ */
 const FEATURES = [
   { id: "blacklist", label: "IP Blacklist", icon: "🚫", desc: "บล็อก IP ที่อยู่ในรายการ blacklist ทั้งหมด" },
-  { id: "ping",      label: "ICMP Block",   icon: "🏓", desc: "บล็อก Ping (ICMP) จากทุก IP ที่เข้ามา" },
-  { id: "port",      label: "Port Block",   icon: "🔒", desc: "บล็อก TCP Port ตามรายการที่กำหนดไว้" },
+  { id: "ping", label: "ICMP Block", icon: "🏓", desc: "บล็อก Ping (ICMP) จากทุก IP ที่เข้ามา" },
+  { id: "port", label: "Port Block", icon: "🔒", desc: "บล็อก TCP Port ตามรายการที่กำหนดไว้" },
 ];
 
 function FeaturesPanel({ features, onToggle }) {
@@ -480,14 +480,14 @@ function StatsPanel({ stats }) {
    BLACKLIST PANEL
 ════════════════════════════════════════════════════════════════════ */
 function BlacklistPanel() {
-  const [rows,    setRows]    = useState([]);
-  const [ip,      setIp]      = useState("");
-  const [note,    setNote]    = useState("");
-  const [error,   setError]   = useState("");
+  const [rows, setRows] = useState([]);
+  const [ip, setIp] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function load() {
-    try { setRows(await apiFetch("/api/blacklist")); } catch {}
+    try { setRows(await apiFetch("/api/blacklist")); } catch { }
   }
 
   useEffect(() => { load(); }, []);
@@ -503,7 +503,7 @@ function BlacklistPanel() {
   }
 
   async function remove(id) {
-    try { await apiFetch(`/api/blacklist/${id}`, { method: "DELETE" }); await load(); } catch {}
+    try { await apiFetch(`/api/blacklist/${id}`, { method: "DELETE" }); await load(); } catch { }
   }
 
   return (
@@ -570,14 +570,14 @@ function BlacklistPanel() {
    PORT BLOCK PANEL
 ════════════════════════════════════════════════════════════════════ */
 function PortsPanel() {
-  const [rows,    setRows]    = useState([]);
-  const [port,    setPort]    = useState("");
-  const [note,    setNote]    = useState("");
-  const [error,   setError]   = useState("");
+  const [rows, setRows] = useState([]);
+  const [port, setPort] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function load() {
-    try { setRows(await apiFetch("/api/ports")); } catch {}
+    try { setRows(await apiFetch("/api/ports")); } catch { }
   }
 
   useEffect(() => { load(); }, []);
@@ -593,14 +593,14 @@ function PortsPanel() {
   }
 
   async function remove(id) {
-    try { await apiFetch(`/api/ports/${id}`, { method: "DELETE" }); await load(); } catch {}
+    try { await apiFetch(`/api/ports/${id}`, { method: "DELETE" }); await load(); } catch { }
   }
 
   const WELL_KNOWN = [
-    { port: 80,   label: "HTTP" },
-    { port: 443,  label: "HTTPS" },
+    { port: 80, label: "HTTP" },
+    { port: 443, label: "HTTPS" },
     { port: 8000, label: "Dev" },
-    { port: 22,   label: "SSH" },
+    { port: 22, label: "SSH" },
     { port: 3306, label: "MySQL" },
   ];
 
@@ -682,9 +682,9 @@ function PortsPanel() {
    LIVE LOGS PANEL
 ════════════════════════════════════════════════════════════════════ */
 function LogsPanel({ liveLog }) {
-  const [history,    setHistory]    = useState([]);
+  const [history, setHistory] = useState([]);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [filter,     setFilter]     = useState("all");
+  const [filter, setFilter] = useState("all");
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -695,7 +695,7 @@ function LogsPanel({ liveLog }) {
         port: r.port,
         timestamp: r.created_at,
       })));
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // Merge history + live
@@ -713,8 +713,8 @@ function LogsPanel({ liveLog }) {
     const body = l.eventType === "blacklist"
       ? `Blocked IP ${l.ip}`
       : l.eventType === "ping"
-      ? `Blocked Ping from ${l.ip}`
-      : `Blocked ${l.ip} → Port ${l.port}`;
+        ? `Blocked Ping from ${l.ip}`
+        : `Blocked ${l.ip} → Port ${l.port}`;
     return (
       <div key={i} className="log-line">
         <span className="log-ts">{ts}</span>
@@ -766,20 +766,20 @@ function LogsPanel({ liveLog }) {
    MAIN APP
 ════════════════════════════════════════════════════════════════════ */
 const TABS = [
-  { id: "overview",  label: "Overview",    icon: "◈" },
+  { id: "overview", label: "Overview", icon: "◈" },
   { id: "blacklist", label: "IP Blacklist", icon: "🚫" },
-  { id: "ports",     label: "Port Block",  icon: "🔒" },
-  { id: "logs",      label: "Live Logs",   icon: "📡" },
+  { id: "ports", label: "Port Block", icon: "🔒" },
+  { id: "logs", label: "Live Logs", icon: "📡" },
 ];
 
 export default function App() {
   injectCSS(CSS);
 
-  const [user,     setUser]     = useState(localStorage.getItem("fw_user") || null);
-  const [tab,      setTab]      = useState("overview");
+  const [user, setUser] = useState(localStorage.getItem("fw_user") || null);
+  const [tab, setTab] = useState("overview");
   const [features, setFeatures] = useState({});
-  const [stats,    setStats]    = useState(null);
-  const [liveLog,  setLiveLog]  = useState([]);
+  const [stats, setStats] = useState(null);
+  const [liveLog, setLiveLog] = useState([]);
   const [fwOnline, setFwOnline] = useState(false);
   const wsRef = useRef(null);
 
@@ -792,7 +792,7 @@ export default function App() {
       ]);
       setFeatures(f);
       setStats(s);
-    } catch {}
+    } catch { }
   }
 
   /* ── WebSocket ── */
@@ -810,14 +810,24 @@ export default function App() {
         setFeatures(obj);
       } else if (msg.type === "log") {
         setLiveLog(prev => [...prev.slice(-500), msg]);
-        setStats(s => s ? { ...s, total: (s.total || 0) + 1 } : s);
+        setStats(s => {
+          if (!s) return s;
+          const byType = [...(s.byType || [])];
+          const idx = byType.findIndex(r => r.event_type === msg.eventType);
+          if (idx !== -1) {
+            byType[idx] = { ...byType[idx], c: byType[idx].c + 1 };
+          } else {
+            byType.push({ event_type: msg.eventType, c: 1 });
+          }
+          return { ...s, total: (s.total || 0) + 1, byType };
+        });
       } else if (msg.type === "firewall_status") {
         setFwOnline(msg.connected);
       }
     };
 
-    ws.onclose  = () => { setTimeout(connectWS, 3000); };
-    ws.onerror  = () => {};
+    ws.onclose = () => { setTimeout(connectWS, 3000); };
+    ws.onerror = () => { };
   }
 
   useEffect(() => {
@@ -849,10 +859,10 @@ export default function App() {
   if (!user) return <LoginPage onLogin={handleLogin} />;
 
   const PAGE_TITLES = {
-    overview:  { title: "System Overview",    sub: "Feature control & statistics" },
-    blacklist: { title: "IP Blacklist",        sub: "Manage blocked IP addresses" },
-    ports:     { title: "Port Blocklist",      sub: "Manage blocked TCP ports" },
-    logs:      { title: "Live Event Log",      sub: "Real-time traffic events" },
+    overview: { title: "System Overview", sub: "Feature control & statistics" },
+    blacklist: { title: "IP Blacklist", sub: "Manage blocked IP addresses" },
+    ports: { title: "Port Blocklist", sub: "Manage blocked TCP ports" },
+    logs: { title: "Live Event Log", sub: "Real-time traffic events" },
   };
 
   return (
@@ -916,8 +926,8 @@ export default function App() {
             </>
           )}
           {tab === "blacklist" && <BlacklistPanel />}
-          {tab === "ports"     && <PortsPanel />}
-          {tab === "logs"      && <LogsPanel liveLog={liveLog} />}
+          {tab === "ports" && <PortsPanel />}
+          {tab === "logs" && <LogsPanel liveLog={liveLog} />}
         </div>
       </div>
     </div>
