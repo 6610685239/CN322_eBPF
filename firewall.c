@@ -135,9 +135,12 @@ int xdp_prog(struct xdp_md *ctx) {
                     .ts_sec = now
                 };
                 
-                u64 *count = packet_counters.lookup(&flow);
-                u64 current_count = (count) ? (*count + 1) : 1;
-                packet_counters.update(&flow, &current_count);
+                u64 init_val = 1;
+                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
+                if (count) {
+                    lock_xadd(count, 1);
+                    current_count = *count;
+                }
 
                 // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
@@ -187,9 +190,12 @@ int xdp_prog(struct xdp_md *ctx) {
                 if ((void *)(udp + 1) > data_end) return XDP_PASS;
                 evt.dport = ntohs(udp->dest);
 
-                u64 *count = packet_counters.lookup(&flow);
-                u64 current_count = (count) ? (*count + 1) : 1;
-                packet_counters.update(&flow, &current_count);
+                u64 init_val = 1;
+                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
+                if (count) {
+                    lock_xadd(count, 1);
+                    current_count = *count;
+                }
 
                 // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
@@ -235,9 +241,12 @@ int xdp_prog(struct xdp_md *ctx) {
                     .ts_sec = now
                 };
                 
-                u64 *count = packet_counters.lookup(&flow);
-                u64 current_count = (count) ? (*count + 1) : 1;
-                packet_counters.update(&flow, &current_count);
+                u64 init_val = 1;
+                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
+                if (count) {
+                    lock_xadd(count, 1);
+                    current_count = *count;
+                }
 
                 // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
