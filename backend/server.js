@@ -113,6 +113,27 @@ ipcServer.subscribe((msg) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+//  5b. Push full init state to every new WS client (survives browser refresh)
+// ══════════════════════════════════════════════════════════════════════════
+wsServer.onClientConnect((ws) => {
+  const recentLogs = logService.getRecentLogs(500).map(r => ({
+    id:        r.id,
+    eventType: r.event_type,
+    ip:        r.ip,
+    port:      r.port ?? null,
+    timestamp: r.created_at,
+  }));
+
+  ws.send(JSON.stringify({
+    type:        "init",
+    features:    firewallService.getFeatures(),
+    floodConfigs:floodService.getAllFloodConfigs(),
+    logs:        recentLogs,
+    fwOnline:    ipcServer.isLoaderConnected,
+  }));
+});
+
+// ══════════════════════════════════════════════════════════════════════════
 //  6. Controller layer — inject services
 // ══════════════════════════════════════════════════════════════════════════
 const authController      = new AuthController(authService);

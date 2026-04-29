@@ -1647,8 +1647,21 @@ export default function App() {
     ws.onmessage = e => {
       const msg = JSON.parse(e.data);
 
-      if (msg.type === "state") {
-        setFeatures(msg.features); // backend sends Record<string, boolean>
+      if (msg.type === "init") {
+        // Full state push from server on connect/reconnect — replaces REST bootstrap
+        setFeatures(msg.features);
+        setFloodConfigs(msg.floodConfigs || []);
+        setLogs(msg.logs || []);
+        setFwOnline(msg.fwOnline);
+        // Derive counts from the pushed data
+        setBlacklistCount(c => c); // keep existing until REST confirms
+        // Re-fetch stats since they are not included in init push
+        apiFetch("/api/stats").then(setStats).catch(() => {});
+        apiFetch("/api/blacklist").then(bl => setBlacklistCount(bl.length)).catch(() => {});
+        apiFetch("/api/ports").then(pt => setPortsCount(pt.length)).catch(() => {});
+
+      } else if (msg.type === "state") {
+        setFeatures(msg.features);
 
       } else if (msg.type === "log") {
         const entry = {
