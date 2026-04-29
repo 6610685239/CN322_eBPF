@@ -684,7 +684,7 @@ const CSS = `
   }
   .log-badge.blacklist { background: rgba(244,63,94,0.12);  color: var(--rose); }
   .log-badge.ping      { background: rgba(245,158,11,0.12); color: var(--amber); }
-  .log-badge.web       { background: rgba(34,211,238,0.12); color: var(--cyan); }
+  .log-badge.port       { background: rgba(34,211,238,0.12); color: var(--cyan); }
   .log-body { color: var(--text); flex: 1; min-width: 0; }
   .log-empty {
     padding: 80px 24px; text-align: center;
@@ -1020,7 +1020,7 @@ function StatsPanel({ stats, fwOnline, blacklistCount, portsCount }) {
     {
       tone: "cyan", icon: Icon.lock,
       label: "Blocked Ports", value: portsCount ?? 0,
-      sub: <>{byType.web ?? 0} hits all-time</>,
+      sub: <>{byType.port ?? 0} hits all-time</>,
     },
     {
       tone: fwOnline ? "emerald" : "amber",
@@ -1542,7 +1542,7 @@ function LogsPanel({ logs }) {
       <div className="card-header">
         <span className="card-title">{Icon.activity} Live Event Log</span>
         <div className="log-controls">
-          {["all", "blacklist", "ping", "web"].map(f => (
+          {["all", "blacklist", "ping", "port"].map(f => (
             <button type="button" key={f} className={`filter-btn ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
               {f}
             </button>
@@ -1613,32 +1613,28 @@ export default function App() {
   const [stopping, setStopping]         = useState(false);
   const wsRef = useRef(null);
 
-  /* ── Load initial data ── */
+  /* ── Load initial data — each fetch is independent so one failure doesn't block others ── */
   async function loadData() {
-    try {
-      const [f, s, fc, ls, status, bl, pt] = await Promise.all([
-        apiFetch("/api/features"),
-        apiFetch("/api/stats"),
-        apiFetch("/api/flood/config"),
-        apiFetch("/api/logs?limit=300"),
-        apiFetch("/api/firewall/status"),
-        apiFetch("/api/blacklist"),
-        apiFetch("/api/ports"),
-      ]);
-      setFeatures(f);
-      setStats(s);
-      setFloodConfigs(fc || []);
-      setLogs(ls.map(r => ({
-        id: r.id,
-        eventType: r.event_type,
-        ip: r.ip,
-        port: r.port,
-        timestamp: r.created_at,
-      })));
-      setFwOnline(status.connected);
-      setBlacklistCount(bl.length);
-      setPortsCount(pt.length);
-    } catch { }
+    const safe = (p) => p.catch(() => null);
+    const [f, s, fc, ls, status, bl, pt] = await Promise.all([
+      safe(apiFetch("/api/features")),
+      safe(apiFetch("/api/stats")),
+      safe(apiFetch("/api/flood/config")),
+      safe(apiFetch("/api/logs?limit=300")),
+      safe(apiFetch("/api/firewall/status")),
+      safe(apiFetch("/api/blacklist")),
+      safe(apiFetch("/api/ports")),
+    ]);
+    if (f)      setFeatures(f);
+    if (s)      setStats(s);
+    if (fc)     setFloodConfigs(fc);
+    if (ls)     setLogs(ls.map(r => ({
+      id: r.id, eventType: r.event_type,
+      ip: r.ip, port: r.port, timestamp: r.created_at,
+    })));
+    if (status) setFwOnline(status.connected);
+    if (bl)     setBlacklistCount(bl.length);
+    if (pt)     setPortsCount(pt.length);
   }
 
   /* ── WebSocket ── */
@@ -1702,11 +1698,20 @@ export default function App() {
     }
   }
 
+
   /* ── Toggle flood feature ── */
   async function onToggleFlood(floodType, enabled) {
-    setFloodConfigs(prev => prev.map(c => c.flood_type === floodType ? { ...c, enabled } : c));
+    setFloodConfigs(prev => {
+      const found = prev.find(c => c.flood_type === floodType);
+      if (found) return prev.map(c => c.flood_type === floodType ? { ...c, enabled } : c);
+      // If config wasn't loaded yet, add a placeholder so the toggle responds
+      return [...prev, { flood_type: floodType, enabled, soft_limit: 0, hard_limit: 0 }];
+    });
     try {
       await apiFetch(`/api/flood/config/${floodType}/enabled`, { method: "PATCH", body: { enabled } });
+      // Re-fetch authoritative flood state after toggle to ensure rates are in sync
+      const fc = await apiFetch("/api/flood/config");
+      if (fc) setFloodConfigs(fc);
     } catch {
       setFloodConfigs(prev => prev.map(c => c.flood_type === floodType ? { ...c, enabled: !enabled } : c));
     }
@@ -1754,9 +1759,13 @@ export default function App() {
     <div className="layout">
       {showStopModal && (
         <ConfirmModal
-          title="Stop firewall?"
-          message="This sends a shutdown signal to the XDP loader and detaches the program from all interfaces. Network traffic will be unprotected until the firewall is manually restarted."
-          confirmLabel="Stop firewall"
+          title={fwOnline ? "Stop firewall?" : "Firewall appears offline"}
+          message={
+            fwOnline
+              ? "This sends a shutdown signal to the XDP loader and detaches the program from all interfaces. Network traffic will be unprotected until the firewall is manually restarted."
+              : "The firewall does not appear to be connected. Sending a shutdown signal anyway — it will take effect if loader.py is still running."
+          }
+          confirmLabel={fwOnline ? "Stop firewall" : "Send signal anyway"}
           onConfirm={onStopFirewall}
           onCancel={() => !stopping && setShowStopModal(false)}
           loading={stopping}
@@ -1803,10 +1812,9 @@ export default function App() {
             type="button"
             className="btn-stop-fw"
             onClick={() => setShowStopModal(true)}
-            disabled={!fwOnline}
-            title={fwOnline ? "Stop the XDP firewall" : "Firewall is already offline"}
+            title={fwOnline ? "Stop the XDP firewall" : "Send shutdown signal"}
           >
-            {Icon.power} Stop Firewall
+            {Icon.power} {fwOnline ? "Stop Firewall" : "Force Stop"}
           </button>
         </div>
 
@@ -1846,16 +1854,17 @@ export default function App() {
                 fwOnline={fwOnline}
                 blacklistCount={blacklistCount}
                 portsCount={portsCount}
+                onNavigate={setTab}
               />
 
               <div className="dash-row cols-2">
                 <FeaturesPanel features={features} onToggle={onToggle} />
-                <FloodSummary floodConfigs={floodConfigs} onToggle={onToggleFlood} />
+                <FloodSummary floodConfigs={floodConfigs} onToggle={onToggleFlood} onManage={() => setTab("flood")} />
               </div>
 
               <div className="dash-row cols-2-asym">
-                <RecentEventsPanel logs={logs} />
-                <TopIpsPanel logs={logs} />
+                <RecentEventsPanel logs={logs} onViewAll={() => setTab("logs")} />
+                <TopIpsPanel logs={logs} onViewAll={() => setTab("logs")} />
               </div>
             </>
           )}
@@ -1864,7 +1873,7 @@ export default function App() {
           )}
           {tab === "blacklist" && <BlacklistPanel onChange={setBlacklistCount} />}
           {tab === "ports"     && <PortsPanel onChange={setPortsCount} />}
-          {tab === "logs"      && <LogsPanel logs={logs} />}
+          {tab === "logs"      && <LogsPanel logs={logs} onClear={() => setLogs([])} />}
         </div>
       </div>
     </div>

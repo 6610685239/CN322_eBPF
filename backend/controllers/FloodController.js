@@ -14,6 +14,13 @@ class FloodController {
    */
   constructor(floodService) {
     this.#floodService = floodService;
+
+    this.getFloodConfigs  = this.getFloodConfigs.bind(this);
+    this.getFloodConfig   = this.getFloodConfig.bind(this);
+    this.setFloodEnabled  = this.setFloodEnabled.bind(this);
+    this.updateFloodRates = this.updateFloodRates.bind(this);
+    this.getFloodLogs     = this.getFloodLogs.bind(this);
+    this.getFloodLogsByIp = this.getFloodLogsByIp.bind(this);
   }
 
   /** @type {FloodService} */
