@@ -82,7 +82,7 @@ const firewallService = new FirewallService(
   ipcServer
 );
 const logService = new LogService(logRepository, wsServer);
-const floodService = new FloodService(featureFlagRepository, floodRateRepository);
+const floodService = new FloodService(featureFlagRepository, floodRateRepository, ipcServer);
 
 // Seed default admin user
 authService.seedDefaultAdmin(ADMIN_USER, ADMIN_PASS);

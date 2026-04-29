@@ -1151,6 +1151,9 @@ function RecentEventsPanel({ logs }) {
   function describe(l) {
     if (l.eventType === "blacklist") return <>Blocked IP <span style={{ color: "var(--rose)" }}>{l.ip}</span></>;
     if (l.eventType === "ping")      return <>Blocked ICMP from <span style={{ color: "var(--amber)" }}>{l.ip}</span></>;
+    if (l.eventType === "flood_hard_limit") return <>Flood Limit Exceeded! Banned <span style={{ color: "var(--rose)" }}>{l.ip}</span></>;
+    if (l.eventType === "flood_soft_limit") return <>Probabilistic Drop (Flood) <span style={{ color: "var(--amber)" }}>{l.ip}</span></>;
+    if (l.eventType === "flood_blocked") return <>IP still banned - Dropping packet from <span style={{ color: "var(--rose)" }}>{l.ip}</span></>;
     return <>Blocked <span>{l.ip}</span> → port <span style={{ color: "var(--cyan)" }}>:{l.port || "?"}</span></>;
   }
 
@@ -1542,9 +1545,9 @@ function LogsPanel({ logs }) {
       <div className="card-header">
         <span className="card-title">{Icon.activity} Live Event Log</span>
         <div className="log-controls">
-          {["all", "blacklist", "ping", "port"].map(f => (
+          {["all", "blacklist", "ping", "port", "flood_hard_limit", "flood_soft_limit"].map(f => (
             <button type="button" key={f} className={`filter-btn ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
-              {f}
+              {f.replace("flood_", "").replace("_limit", "")}
             </button>
           ))}
           <label className="checkbox-label">

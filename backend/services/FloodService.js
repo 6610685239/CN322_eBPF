@@ -13,10 +13,12 @@ class FloodService {
   /**
    * @param {FeatureFlagRepository} featureFlagRepository
    * @param {FloodRateRepository} floodRateRepository
+   * @param {import("../ipc/IPCServer")} ipcServer
    */
-  constructor(featureFlagRepository, floodRateRepository) {
+  constructor(featureFlagRepository, floodRateRepository, ipcServer) {
     this.#featureFlagRepository = featureFlagRepository;
     this.#floodRateRepository = floodRateRepository;
+    this.#ipc = ipcServer;
   }
 
   /** @type {FeatureFlagRepository} */
@@ -24,6 +26,9 @@ class FloodService {
 
   /** @type {FloodRateRepository} */
   #floodRateRepository;
+
+  /** @type {import("../ipc/IPCServer")} */
+  #ipc;
 
   /**
    * Get all flood configurations with their enabled status
@@ -75,14 +80,15 @@ class FloodService {
       throw new Error(`Invalid flood type: ${floodType}`);
     }
 
-    // First ensure the feature flag exists
-    const existingFlags = this.#featureFlagRepository.findAllAsMap();
-    if (!(floodType in existingFlags)) {
-      // Add the feature flag entry manually if needed
-      // For now assume it exists via seed() in FeatureFlagRepository
+    const success = this.#featureFlagRepository.setEnabled(floodType, enabled);
+    if (success) {
+      this.#ipc.send({
+        action: "toggle_feature",
+        feature: floodType,
+        enabled: enabled ? 1 : 0,
+      });
     }
-
-    return this.#featureFlagRepository.setEnabled(floodType, enabled);
+    return success;
   }
 
   /**
@@ -105,7 +111,20 @@ class FloodService {
       throw new Error("Soft limit must be less than hard limit");
     }
 
-    return this.#floodRateRepository.update(floodType, softLimit, hardLimit);
+    const success = this.#floodRateRepository.update(
+      floodType,
+      softLimit,
+      hardLimit
+    );
+    if (success) {
+      this.#ipc.send({
+        action: "update_flood_rates",
+        flood_type: floodType,
+        soft_limit: softLimit,
+        hard_limit: hardLimit,
+      });
+    }
+    return success;
   }
 
   /**

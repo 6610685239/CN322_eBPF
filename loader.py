@@ -335,6 +335,7 @@ TYPE_LABEL = {
     3: "port",
     4: "flood_hard_limit",
     5: "flood_blocked",
+    6: "flood_soft_limit",
 }
 
 def print_event(cpu, data, size):
@@ -349,8 +350,9 @@ def print_event(cpu, data, size):
         1: f"[BLACKLIST] Blocked IP: {ip_str}",
         2: f"[PING]      Blocked Ping from: {ip_str}",
         3: f"[PORT]       Blocked {ip_str} → Port {event.dport}",
-        4: f"[FLOOD]     Hard limit exceeded: {flood_name} flood from {ip_str} (BLOCKED 1 min)",
-        5: f"[FLOOD]     Temporarily blocked IP: {ip_str}",
+        4: f"[FLOOD]     Hard limit exceeded: {flood_name} flood from {ip_str} (IP BANNED 1 min)",
+        5: f"[FLOOD]     Packet dropped (IP is still banned): {ip_str}",
+        6: f"[FLOOD]     Soft limit exceeded (Probabilistic Drop): {flood_name} from {ip_str}",
     }.get(event.type, f"[?] {ip_str}")
 
     print(label)
@@ -360,7 +362,7 @@ def print_event(cpu, data, size):
         "eventType": etype,
         "ip":        ip_str,
         "port":      event.dport if event.type == 3 else None,
-        "floodType": flood_name if event.type in [3, 4, 5] else None,
+        "floodType": flood_name if event.type in [4, 5, 6] else None,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
 

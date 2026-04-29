@@ -20,12 +20,16 @@ struct flood_config_t {
     u32 enabled;
 };
 
-// Packet counter per IP per protocol per second: key = (timestamp_sec << 34 | proto << 32 | IP),
-// value = packet_count
+// counter_val_t: sliding window counter
+// key = (ip, proto)
 struct flow_key_t {
     u32 ip;
-    u32 proto;  // IPPROTO_TCP, IPPROTO_UDP, IPPROTO_ICMP
-    u32 ts_sec;
+    u32 proto;
+};
+
+struct counter_val_t {
+    u64 count;
+    u64 first_ts;  // timestamp วินาทีแรกของ window นี้
 };
 
 BPF_PERF_OUTPUT(events);
@@ -42,11 +46,12 @@ BPF_HASH(blacklist, u32, u64);
 // Blocked IPs (due to hard limit): key = IP, value = block_timestamp_sec
 BPF_HASH(blocked_ips, u32, u64);
 
-// Packet counters per flow (IP + protocol + sec)
-BPF_HASH(packet_counters, struct flow_key_t, u64);
+// Packet counters per flow (IP + protocol), sliding window via first_ts
+BPF_HASH(packet_counters, struct flow_key_t, struct counter_val_t);
 
 // Dynamic port blocklist (port -> 1)
 BPF_HASH(port_blocklist, u16, u8);
+
 // Whitelist
 BPF_HASH(whitelist, u32, u8);
 
@@ -56,16 +61,39 @@ static u64 bpf_get_current_time_sec() {
 }
 
 // Helper: Probabilistic drop (drop ~percentage of packets)
-// percentage: 0-100, randval: random value 0-4294967295
 static int should_probabilistic_drop(u32 percentage, u32 randval) {
-    // Map 0-100 to 0-4294967295 range
-    u64 threshold = (u64)percentage * 42949672ULL; // ~4B/100
+    // scale percentage (0-100) to 0-4294967295
+    u64 threshold = (u64)percentage * 42949672ULL;
     return (u64)randval < threshold;
 }
 
+// Helper: อ่าน counter และ reset ถ้า window หมดอายุ (>= 1 วินาที)
+static u64 get_and_update_counter(void *map, struct flow_key_t *flow, u64 now) {
+    struct counter_val_t *val;
+    struct counter_val_t init = {};
+
+    val = bpf_map_lookup_elem(map, flow);
+    if (!val) {
+        init.count    = 1;
+        init.first_ts = now;
+        bpf_map_update_elem(map, flow, &init, BPF_ANY);
+        return 1;
+    }
+
+    if (now - val->first_ts >= 1) {
+        val->count    = 1;
+        val->first_ts = now;
+        bpf_map_update_elem(map, flow, val, BPF_ANY);
+        return 1;
+    }
+
+    lock_xadd(&val->count, 1);
+    return val->count;
+}
+
 int xdp_prog(struct xdp_md *ctx) {
-    void *data     = (void *)(long)ctx->data;
-    void *data_end = (void *)(long)ctx->data_end;
+    void *data      = (void *)(long)ctx->data;
+    void *data_end  = (void *)(long)ctx->data_end;
     struct ethhdr *eth = data;
     struct iphdr  *ip;
     struct tcphdr *tcp;
@@ -80,29 +108,27 @@ int xdp_prog(struct xdp_md *ctx) {
 
     evt.saddr = ip->saddr;
 
-    // Whitelist
+    // --- Whitelist ---
     u8 *wl = whitelist.lookup(&evt.saddr);
     if (wl) return XDP_PASS;
 
-    u32 key_bl   = 0;
-    u32 key_ping = 1;
-    u32 key_port = 2;
+    u32 key_bl         = 0;
+    u32 key_ping       = 1;
+    u32 key_port       = 2;
     u32 key_udp_flood  = 10;
     u32 key_icmp_flood = 11;
     u32 key_syn_flood  = 12;
 
-    // --- Check if IP is blocked (hard limit) ---
+    // --- Check if IP is temporarily blocked (due to previous flood) ---
     u64 *blocked_ts = blocked_ips.lookup(&evt.saddr);
     if (blocked_ts) {
         u64 now = bpf_get_current_time_sec();
-        // Block for 60 seconds
         if (now - *blocked_ts < 60) {
-            evt.type = 5;  // blocked
+            evt.type = 5; // blocked
             evt.flood_type = 255;
             events.perf_submit(ctx, &evt, sizeof(evt));
             return XDP_DROP;
         } else {
-            // Unblock
             blocked_ips.delete(&evt.saddr);
         }
     }
@@ -110,9 +136,9 @@ int xdp_prog(struct xdp_md *ctx) {
     // --- Gate 1: Blacklist ---
     u8 *fl_bl = feature_flags.lookup(&key_bl);
     if (fl_bl && *fl_bl == 1) {
-        u64 *val = blacklist.lookup(&evt.saddr);
-        if (val) {
-            lock_xadd(val, 1);
+        u64 *hits = blacklist.lookup(&evt.saddr);
+        if (hits) {
+            lock_xadd(hits, 1);
             evt.type = 1;
             events.perf_submit(ctx, &evt, sizeof(evt));
             return XDP_DROP;
@@ -124,39 +150,24 @@ int xdp_prog(struct xdp_md *ctx) {
     u8 *fl_icmp_flood = feature_flags.lookup(&key_icmp_flood);
     
     if (ip->protocol == IPPROTO_ICMP) {
-        // Check ICMP flood
         if (fl_icmp_flood && *fl_icmp_flood == 1) {
             struct flood_config_t *cfg = flood_config.lookup(&key_icmp_flood);
             if (cfg && cfg->enabled) {
                 u64 now = bpf_get_current_time_sec();
-                struct flow_key_t flow = {
-                    .ip = evt.saddr,
-                    .proto = IPPROTO_ICMP,
-                    .ts_sec = now
-                };
-                
-                u64 init_val = 1;
-                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
-                if (count) {
-                    lock_xadd(count, 1);
-                    current_count = *count;
-                }
+                struct flow_key_t flow = { .ip = evt.saddr, .proto = IPPROTO_ICMP };
+                u64 current_count = get_and_update_counter(&packet_counters, &flow, now);
 
-                // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
-                    // Block this IP
                     blocked_ips.update(&evt.saddr, &now);
-                    evt.type = 4;
-                    evt.flood_type = 11;  // ICMP
+                    evt.type = 4; // flood_hard_limit
+                    evt.flood_type = 11;
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
-                }
-                // Check if exceeds soft limit - probabilistic drop
-                else if (current_count > cfg->soft_limit) {
+                } else if (current_count > cfg->soft_limit) {
                     u32 rand_val = bpf_get_prandom_u32();
                     u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
                     if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
+                        evt.type = 6; // flood_soft_limit
                         evt.flood_type = 11;
                         events.perf_submit(ctx, &evt, sizeof(evt));
                         return XDP_DROP;
@@ -165,9 +176,8 @@ int xdp_prog(struct xdp_md *ctx) {
             }
         }
         
-        // Check regular ICMP ping block
         if (fl_ping && *fl_ping == 1) {
-            evt.type = 2;
+            evt.type = 2; // ping_blocked
             events.perf_submit(ctx, &evt, sizeof(evt));
             return XDP_DROP;
         }
@@ -176,41 +186,28 @@ int xdp_prog(struct xdp_md *ctx) {
     // --- Gate 3: UDP Flood Detection ---
     u8 *fl_udp_flood = feature_flags.lookup(&key_udp_flood);
     if (ip->protocol == IPPROTO_UDP) {
+        udp = (void *)ip + (ip->ihl * 4);
+        if ((void *)(udp + 1) > data_end) return XDP_PASS;
+        evt.dport = ntohs(udp->dest);
+
         if (fl_udp_flood && *fl_udp_flood == 1) {
             struct flood_config_t *cfg = flood_config.lookup(&key_udp_flood);
             if (cfg && cfg->enabled) {
                 u64 now = bpf_get_current_time_sec();
-                struct flow_key_t flow = {
-                    .ip = evt.saddr,
-                    .proto = IPPROTO_UDP,
-                    .ts_sec = now
-                };
-                
-                udp = (void *)ip + (ip->ihl * 4);
-                if ((void *)(udp + 1) > data_end) return XDP_PASS;
-                evt.dport = ntohs(udp->dest);
+                struct flow_key_t flow = { .ip = evt.saddr, .proto = IPPROTO_UDP };
+                u64 current_count = get_and_update_counter(&packet_counters, &flow, now);
 
-                u64 init_val = 1;
-                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
-                if (count) {
-                    lock_xadd(count, 1);
-                    current_count = *count;
-                }
-
-                // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
                     blocked_ips.update(&evt.saddr, &now);
                     evt.type = 4;
-                    evt.flood_type = 10;  // UDP
+                    evt.flood_type = 10;
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
-                }
-                // Check if exceeds soft limit - probabilistic drop
-                else if (current_count > cfg->soft_limit) {
+                } else if (current_count > cfg->soft_limit) {
                     u32 rand_val = bpf_get_prandom_u32();
                     u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
                     if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
+                        evt.type = 6;
                         evt.flood_type = 10;
                         events.perf_submit(ctx, &evt, sizeof(evt));
                         return XDP_DROP;
@@ -220,48 +217,33 @@ int xdp_prog(struct xdp_md *ctx) {
         }
     }
 
-    // --- Gate 4: TCP Port (dynamic list) + SYN Flood Detection ---
+    // --- Gate 4: TCP Port + SYN Flood Detection ---
     u8 *fl_port = feature_flags.lookup(&key_port);
     u8 *fl_syn_flood = feature_flags.lookup(&key_syn_flood);
     
     if (ip->protocol == IPPROTO_TCP) {
         tcp = (void *)ip + (ip->ihl * 4);
         if ((void *)(tcp + 1) > data_end) return XDP_PASS;
-
         evt.dport = ntohs(tcp->dest);
 
-        // Check SYN flood
         if (fl_syn_flood && *fl_syn_flood == 1) {
             struct flood_config_t *cfg = flood_config.lookup(&key_syn_flood);
             if (cfg && cfg->enabled) {
                 u64 now = bpf_get_current_time_sec();
-                struct flow_key_t flow = {
-                    .ip = evt.saddr,
-                    .proto = IPPROTO_TCP,
-                    .ts_sec = now
-                };
-                
-                u64 init_val = 1;
-                u64 *count = packet_counters.lookup_or_try_init(&flow, &init_val);
-                if (count) {
-                    lock_xadd(count, 1);
-                    current_count = *count;
-                }
+                struct flow_key_t flow = { .ip = evt.saddr, .proto = IPPROTO_TCP };
+                u64 current_count = get_and_update_counter(&packet_counters, &flow, now);
 
-                // Check if exceeds hard limit
                 if (current_count > cfg->hard_limit) {
                     blocked_ips.update(&evt.saddr, &now);
                     evt.type = 4;
-                    evt.flood_type = 12;  // SYN
+                    evt.flood_type = 12;
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
-                }
-                // Check if exceeds soft limit - probabilistic drop
-                else if (current_count > cfg->soft_limit) {
+                } else if (current_count > cfg->soft_limit) {
                     u32 rand_val = bpf_get_prandom_u32();
                     u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
                     if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
+                        evt.type = 6;
                         evt.flood_type = 12;
                         events.perf_submit(ctx, &evt, sizeof(evt));
                         return XDP_DROP;
@@ -270,11 +252,10 @@ int xdp_prog(struct xdp_md *ctx) {
             }
         }
 
-        // Check port blocklist
         if (fl_port && *fl_port == 1) {
             u8 *blocked = port_blocklist.lookup(&evt.dport);
             if (blocked) {
-                evt.type = 3;
+                evt.type = 3; // port_blocked
                 events.perf_submit(ctx, &evt, sizeof(evt));
                 return XDP_DROP;
             }
