@@ -1628,10 +1628,19 @@ export default function App() {
     if (f)      setFeatures(f);
     if (s)      setStats(s);
     if (fc)     setFloodConfigs(fc);
-    if (ls)     setLogs(ls.map(r => ({
-      id: r.id, eventType: r.event_type,
-      ip: r.ip, port: r.port, timestamp: r.created_at,
-    })));
+    if (ls) {
+      const fromDB = ls.map(r => ({
+        id: r.id, eventType: r.event_type,
+        ip: r.ip, port: r.port, timestamp: r.created_at,
+      }));
+      // Merge: เก็บ live entries ที่มาระหว่าง fetch ยังไม่เสร็จ (race condition window)
+      // dedup ด้วย DB id เพราะ WS ส่ง id จริงมาแล้ว
+      setLogs(prev => {
+        const dbIds = new Set(fromDB.map(r => r.id));
+        const liveOnly = prev.filter(r => !dbIds.has(r.id));
+        return [...fromDB, ...liveOnly].slice(-1000);
+      });
+    }
     if (status) setFwOnline(status.connected);
     if (bl)     setBlacklistCount(bl.length);
     if (pt)     setPortsCount(pt.length);
@@ -1652,13 +1661,17 @@ export default function App() {
 
       } else if (msg.type === "log") {
         const entry = {
-          id: `live-${Date.now()}-${Math.random()}`,
+          id: msg.id,               // ← ใช้ DB id จริง (ไม่ใช่ random)
           eventType: msg.eventType,
           ip: msg.ip,
           port: msg.port ?? null,
           timestamp: msg.timestamp,
         };
-        setLogs(prev => [...prev.slice(-999), entry]);
+        // dedup ด้วย DB id — ป้องกัน StrictMode / double-WS ส่งซ้ำ
+        setLogs(prev => {
+          if (prev.some(r => r.id === entry.id)) return prev;
+          return [...prev.slice(-999), entry];
+        });
         setStats(s => {
           if (!s) return s;
           const byType = [...(s.byType || [])];

@@ -37,10 +37,12 @@ class LogService {
    * @param {string}      timestamp  ISO string จาก loader.py
    */
   recordAndBroadcast(eventType, ip, port, timestamp) {
-    this.#logRepo.create(eventType, ip, port ?? null);
+    // รับ DB id กลับมาเพื่อใช้ dedup ฝั่ง frontend
+    const id = this.#logRepo.create(eventType, ip, port ?? null);
 
     this.#ws.broadcast({
       type:      "log",
+      id,                          // ← DB id จริง ใช้ dedup ใน browser
       eventType,
       ip,
       port:      port ?? null,
