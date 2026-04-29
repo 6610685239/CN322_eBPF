@@ -141,6 +141,16 @@ const router = createRouter(
 
 app.use("/api", router);
 
+// Firewall status & shutdown — inline routes (need ipcServer directly)
+app.get("/api/firewall/status", authMiddleware, (_req, res) => {
+  res.json({ connected: ipcServer.isLoaderConnected });
+});
+
+app.post("/api/firewall/shutdown", authMiddleware, (_req, res) => {
+  ipcServer.send({ action: "shutdown" });
+  res.json({ ok: true });
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 //  8. Start servers
 // ══════════════════════════════════════════════════════════════════════════
