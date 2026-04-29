@@ -1681,7 +1681,21 @@ export default function App() {
     if (!user) return;
     loadData();
     connectWS();
-    return () => { wsRef.current?.close(); wsRef.current = null; };
+
+    // Poll firewall status every 5 s — catches cases where WebSocket missed
+    // the connect/disconnect event (e.g. browser was in background)
+    const statusPoll = setInterval(async () => {
+      try {
+        const s = await apiFetch("/api/firewall/status");
+        setFwOnline(s.connected);
+      } catch { }
+    }, 5000);
+
+    return () => {
+      clearInterval(statusPoll);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
   }, [user]);
 
   /* ── Refresh blacklist/ports counts when their tabs change them ── */
