@@ -1773,10 +1773,25 @@ export default function App() {
   async function onStopFirewall() {
     setStopping(true);
     try {
-      await apiFetch("/api/firewall/shutdown", { method: "POST" });
+      // Disable all features: regular features (blacklist, ping, port)
+      const featuresToDisable = ["blacklist", "ping", "port"];
+      const featureRequests = featuresToDisable.map((name) =>
+        apiFetch(`/api/features/${name}`, { method: "PATCH", body: { enabled: false } })
+      );
+
+      // Disable all flood protection types (udp_flood, icmp_flood, syn_flood)
+      const floodTypesToDisable = ["udp_flood", "icmp_flood", "syn_flood"];
+      const floodRequests = floodTypesToDisable.map((type) =>
+        apiFetch(`/api/flood/config/${type}/enabled`, { method: "PATCH", body: { enabled: false } })
+      );
+
+      // Send all requests in parallel
+      await Promise.all([...featureRequests, ...floodRequests]);
+      // Refresh UI state from backend
+      await loadData();
       setShowStopModal(false);
     } catch (e) {
-      alert(`Failed to send shutdown: ${e.message}`);
+      alert(`Failed to disable features: ${e.message}`);
     } finally {
       setStopping(false);
     }
