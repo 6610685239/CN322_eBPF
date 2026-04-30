@@ -9,6 +9,7 @@ import socket
 import struct
 import ctypes
 import sqlite3
+import subprocess
 import threading
 import json
 import time
@@ -17,7 +18,30 @@ import os
 # ─── Config ───────────────────────────────────────────────
 IPC_SOCKET_PATH = "/tmp/firewall.sock"
 DB_PATH         = os.environ.get("FIREWALL_DB", "/var/lib/firewall/firewall.db")
-DEVICES         = ["enp0s9", "enp0s8", "enp0s3", "lo"]
+
+def detect_interfaces():
+    """ดึง network interface ทุกตัวที่ UP บนเครื่อง ยกเว้น virtual/docker"""
+    skip_prefixes = ("docker", "br-", "veth", "virbr", "vmnet", "tun", "tap")
+    interfaces = []
+    try:
+        result = subprocess.run(
+            ["ip", "-o", "link", "show", "up"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            # format: "1: lo: <FLAGS> ..." หรือ "2: enp0s3: <FLAGS> ..."
+            parts = line.split(":")
+            if len(parts) >= 2:
+                name = parts[1].strip()
+                if not any(name.startswith(p) for p in skip_prefixes):
+                    interfaces.append(name)
+    except Exception as e:
+        print(f"[XDP] Interface detection failed: {e} — using fallback")
+        interfaces = ["enp0s9", "enp0s8", "enp0s3", "lo"]
+    return interfaces
+
+DEVICES = detect_interfaces()
+print(f"[XDP] Detected interfaces: {DEVICES}")
 
 # ─── BPF feature-flag key constants ───────────────────────
 KEY_BLACKLIST = 0
@@ -86,7 +110,6 @@ def populate_whitelist():
         pass
 
     try:
-        import subprocess
         result = subprocess.run(
             ["ip", "-4", "addr", "show"],
             capture_output=True, text=True, timeout=5
