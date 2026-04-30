@@ -18,6 +18,9 @@ echo -e "
 ${BOLD}วิธีใช้งาน:${NC}
 
   ${YELLOW}# Terminal 1 — Node.js Backend${NC}
+  sudo mkdir -p /var/lib/firewall && chmod 777 /var/lib/firewall
+
+  ${YELLOW}# Terminal 1 — Node.js Backend${NC}
   cd backend
   npm install
   node server.js
