@@ -76,8 +76,7 @@ git clone git@github.com:6610685239/CN322_eBPF.git
 cd CN322_eBPF
  
 # 2. run setup script 
-chmod +x setup.sh
-sudo ./setup.sh
+chmod +x setup.sh && sudo ./setup.sh
  
 # 3. run Backend (Terminal 1)
 cd backend
