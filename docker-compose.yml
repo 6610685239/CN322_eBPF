@@ -1,0 +1,40 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    environment:
+      - FIREWALL_DB=/data/firewall.db
+      - IPC_SOCK_PATH=/run/ipc/firewall.sock
+    volumes:
+      - db_data:/data
+      - socket_vol:/run/ipc
+
+  loader:
+    build:
+      context: .
+      dockerfile: Dockerfile.loader
+    privileged: true
+    network_mode: host
+    environment:
+      - FIREWALL_DB=/data/firewall.db
+      - IPC_SOCK_PATH=/run/ipc/firewall.sock
+    volumes:
+      - db_data:/data
+      - socket_vol:/run/ipc
+      - /lib/modules:/lib/modules:ro
+      - /usr/src:/usr/src:ro
+      - /sys/fs/bpf:/sys/fs/bpf
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  socket_vol:
