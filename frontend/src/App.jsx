@@ -750,6 +750,7 @@ const CSS = `
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-lg), var(--glow-cyan);
     position: relative; z-index: 1;
+    display: flex; flex-direction: column;
   }
   .login-brand {
     display: flex; align-items: center; gap: 14px; margin-bottom: 32px;
@@ -780,11 +781,11 @@ const CSS = `
     box-shadow: 0 0 0 3px rgba(34,211,238,0.12);
   }
   .btn-login {
-    width: 100%; padding: 13px;
+    width: auto; padding: 9px 32px;
     background: linear-gradient(180deg, var(--cyan), var(--cyan-deep));
     color: #07090d; border: none;
-    font-weight: 700; font-size: 13.5px; letter-spacing: 1px;
-    cursor: pointer; margin-top: 8px;
+    font-weight: 700; font-size: 13px; letter-spacing: 1px;
+    cursor: pointer; margin-top: 8px; align-self: center;
     border-radius: var(--r-sm);
     box-shadow: 0 0 20px rgba(34,211,238,0.25);
     transition: all .15s ease;
@@ -948,7 +949,7 @@ function LoginPage({ onLogin }) {
           <div className="brand-logo">{Icon.shield}</div>
           <div>
             <div className="login-title">XDP Firewall</div>
-            <div className="login-h">Sign in</div>
+            <div className="login-h">Log in</div>
           </div>
         </div>
         <div className="form-group">
@@ -1656,8 +1657,21 @@ export default function App() {
     ws.onmessage = e => {
       const msg = JSON.parse(e.data);
 
-      if (msg.type === "state") {
-        setFeatures(msg.features); // backend sends Record<string, boolean>
+      if (msg.type === "init") {
+        // Full state push from server on connect/reconnect — replaces REST bootstrap
+        setFeatures(msg.features);
+        setFloodConfigs(msg.floodConfigs || []);
+        setLogs(msg.logs || []);
+        setFwOnline(msg.fwOnline);
+        // Derive counts from the pushed data
+        setBlacklistCount(c => c); // keep existing until REST confirms
+        // Re-fetch stats since they are not included in init push
+        apiFetch("/api/stats").then(setStats).catch(() => {});
+        apiFetch("/api/blacklist").then(bl => setBlacklistCount(bl.length)).catch(() => {});
+        apiFetch("/api/ports").then(pt => setPortsCount(pt.length)).catch(() => {});
+
+      } else if (msg.type === "state") {
+        setFeatures(msg.features);
 
       } else if (msg.type === "log") {
         const entry = {

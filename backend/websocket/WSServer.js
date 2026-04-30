@@ -20,9 +20,10 @@ class WSServer {
    * @param {import("../services/AuthService")}  authService
    */
   constructor(httpServer, authService) {
-    this.#authService = authService;
-    this.#clients     = new Set();
-    this.#wss         = new WebSocketServer({ server: httpServer, path: "/ws" });
+    this.#authService    = authService;
+    this.#clients        = new Set();
+    this.#connectHandler = null;
+    this.#wss            = new WebSocketServer({ server: httpServer, path: "/ws" });
     this.#init();
   }
 
@@ -31,6 +32,17 @@ class WSServer {
   #clients;
   /** @type {WebSocketServer} */
   #wss;
+  /** @type {((ws: import("ws").WebSocket) => void)|null} */
+  #connectHandler;
+
+  /**
+   * ลงทะเบียน callback ที่จะถูกเรียกทันทีเมื่อ client ใหม่ authenticate สำเร็จ
+   * ใช้สำหรับ push initial state ไปยัง client ที่เพิ่ง connect
+   * @param {(ws: import("ws").WebSocket) => void} handler
+   */
+  onClientConnect(handler) {
+    this.#connectHandler = handler;
+  }
 
   /** ตั้งค่า event handlers สำหรับ WebSocket server */
   #init() {
@@ -48,6 +60,13 @@ class WSServer {
 
       this.#clients.add(ws);
       console.log(`[WSServer] Client connected  (total: ${this.#clients.size})`);
+
+      // Push full initial state to this client immediately
+      if (this.#connectHandler) {
+        try { this.#connectHandler(ws); } catch (err) {
+          console.error("[WSServer] onClientConnect error:", err.message);
+        }
+      }
 
       ws.on("close", () => {
         this.#clients.delete(ws);

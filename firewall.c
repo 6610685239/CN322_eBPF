@@ -55,13 +55,6 @@ static u64 bpf_get_current_time_sec() {
     return bpf_ktime_get_ns() / 1000000000ULL;
 }
 
-// Helper: Probabilistic drop (drop ~percentage of packets)
-// percentage: 0-100, randval: random value 0-4294967295
-static int should_probabilistic_drop(u32 percentage, u32 randval) {
-    // Map 0-100 to 0-4294967295 range
-    u64 threshold = (u64)percentage * 42949672ULL; // ~4B/100
-    return (u64)randval < threshold;
-}
 
 int xdp_prog(struct xdp_md *ctx) {
     void *data     = (void *)(long)ctx->data;
@@ -91,18 +84,13 @@ int xdp_prog(struct xdp_md *ctx) {
     u32 key_icmp_flood = 11;
     u32 key_syn_flood  = 12;
 
-    // --- Check if IP is blocked (hard limit) ---
+    // --- Check if IP is banned (flood hard limit) — silent drop ---
     u64 *blocked_ts = blocked_ips.lookup(&evt.saddr);
     if (blocked_ts) {
         u64 now = bpf_get_current_time_sec();
-        // Block for 60 seconds
         if (now - *blocked_ts < 60) {
-            evt.type = 5;  // blocked
-            evt.flood_type = 255;
-            events.perf_submit(ctx, &evt, sizeof(evt));
             return XDP_DROP;
         } else {
-            // Unblock
             blocked_ips.delete(&evt.saddr);
         }
     }
@@ -139,25 +127,17 @@ int xdp_prog(struct xdp_md *ctx) {
                 u64 current_count = (count) ? (*count + 1) : 1;
                 packet_counters.update(&flow, &current_count);
 
-                // Check if exceeds hard limit
+                // Hard limit: ban IP for 60s
                 if (current_count > cfg->hard_limit) {
-                    // Block this IP
                     blocked_ips.update(&evt.saddr, &now);
                     evt.type = 4;
                     evt.flood_type = 11;  // ICMP
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
                 }
-                // Check if exceeds soft limit - probabilistic drop
+                // Soft limit: drop every packet silently (no event — avoid IPC flood)
                 else if (current_count > cfg->soft_limit) {
-                    u32 rand_val = bpf_get_prandom_u32();
-                    u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
-                    if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
-                        evt.flood_type = 11;
-                        events.perf_submit(ctx, &evt, sizeof(evt));
-                        return XDP_DROP;
-                    }
+                    return XDP_DROP;
                 }
             }
         }
@@ -191,7 +171,7 @@ int xdp_prog(struct xdp_md *ctx) {
                 u64 current_count = (count) ? (*count + 1) : 1;
                 packet_counters.update(&flow, &current_count);
 
-                // Check if exceeds hard limit
+                // Hard limit: ban IP for 60s
                 if (current_count > cfg->hard_limit) {
                     blocked_ips.update(&evt.saddr, &now);
                     evt.type = 4;
@@ -199,16 +179,9 @@ int xdp_prog(struct xdp_md *ctx) {
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
                 }
-                // Check if exceeds soft limit - probabilistic drop
+                // Soft limit: drop every packet silently (no event — avoid IPC flood)
                 else if (current_count > cfg->soft_limit) {
-                    u32 rand_val = bpf_get_prandom_u32();
-                    u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
-                    if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
-                        evt.flood_type = 10;
-                        events.perf_submit(ctx, &evt, sizeof(evt));
-                        return XDP_DROP;
-                    }
+                    return XDP_DROP;
                 }
             }
         }
@@ -239,7 +212,7 @@ int xdp_prog(struct xdp_md *ctx) {
                 u64 current_count = (count) ? (*count + 1) : 1;
                 packet_counters.update(&flow, &current_count);
 
-                // Check if exceeds hard limit
+                // Hard limit: ban IP for 60s
                 if (current_count > cfg->hard_limit) {
                     blocked_ips.update(&evt.saddr, &now);
                     evt.type = 4;
@@ -247,16 +220,9 @@ int xdp_prog(struct xdp_md *ctx) {
                     events.perf_submit(ctx, &evt, sizeof(evt));
                     return XDP_DROP;
                 }
-                // Check if exceeds soft limit - probabilistic drop
+                // Soft limit: drop every packet silently (no event — avoid IPC flood)
                 else if (current_count > cfg->soft_limit) {
-                    u32 rand_val = bpf_get_prandom_u32();
-                    u32 drop_rate = ((current_count - cfg->soft_limit) * 100) / (cfg->hard_limit - cfg->soft_limit);
-                    if (should_probabilistic_drop(drop_rate, rand_val)) {
-                        evt.type = 3;
-                        evt.flood_type = 12;
-                        events.perf_submit(ctx, &evt, sizeof(evt));
-                        return XDP_DROP;
-                    }
+                    return XDP_DROP;
                 }
             }
         }

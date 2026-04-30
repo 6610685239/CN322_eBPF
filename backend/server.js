@@ -82,7 +82,7 @@ const firewallService = new FirewallService(
   ipcServer
 );
 const logService = new LogService(logRepository, wsServer);
-const floodService = new FloodService(featureFlagRepository, floodRateRepository);
+const floodService = new FloodService(featureFlagRepository, floodRateRepository, ipcServer);
 
 // Seed default admin user
 authService.seedDefaultAdmin(ADMIN_USER, ADMIN_PASS);
@@ -110,6 +110,27 @@ ipcServer.subscribe((msg) => {
       msg.timestamp
     );
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  5b. Push full init state to every new WS client (survives browser refresh)
+// ══════════════════════════════════════════════════════════════════════════
+wsServer.onClientConnect((ws) => {
+  const recentLogs = logService.getRecentLogs(500).map(r => ({
+    id:        r.id,
+    eventType: r.event_type,
+    ip:        r.ip,
+    port:      r.port ?? null,
+    timestamp: r.created_at,
+  }));
+
+  ws.send(JSON.stringify({
+    type:        "init",
+    features:    firewallService.getFeatures(),
+    floodConfigs:floodService.getAllFloodConfigs(),
+    logs:        recentLogs,
+    fwOnline:    ipcServer.isLoaderConnected,
+  }));
 });
 
 // ══════════════════════════════════════════════════════════════════════════
