@@ -1,0 +1,28 @@
+# Dependencies (Library ต่างๆ)
+node_modules/
+jspm_packages/
+
+# Production Build (ไฟล์ที่ได้หลังการ Build)
+dist/
+build/
+out/
+
+# Environment Variables (ความลับ)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+thumbs.db
+
+# IDE Settings (ตั้งค่าส่วนตัวของโปรแกรมเขียนโค้ด)
+.vscode/
+.idea/
