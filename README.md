@@ -237,7 +237,7 @@ The loader will:
     <tr>
       <td align="center"><b>6610685205</b></td>
       <td>Nonthapat Boonprasith</td>
-      <td>Frontend Dashboard / UX</td>
+      <td>Frontend Dashboard / UX/UI </td>
     </tr>
     <tr>
       <td align="center"><b>6610685239</b></td>
